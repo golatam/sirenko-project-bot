@@ -1,0 +1,52 @@
+global:
+  owner_telegram_id: 123456789  # Заменить на реальный Telegram ID владельца
+  default_model: "claude-sonnet-4-6"
+  complex_model: "claude-opus-4-6"
+  max_tokens: 4096
+  phase: "read_only"  # read_only | drafts | controlled
+  db_path: "data/agent.db"
+
+projects:
+  alpha:
+    display_name: "Chile/Venezuela Lawyers"
+    phase: "read_only"
+    system_prompt_file: "config/prompts/project_alpha.md"
+    gmail:
+      enabled: true
+      credentials_dir: "credentials/project_alpha/gmail"
+    calendar:
+      enabled: true
+      account_id: "alpha@gmail.com"
+    telegram_monitor:
+      enabled: false
+      session_string_env: "TG_SESSION_ALPHA"
+      monitored_chats: []
+    tool_policy:
+      read_only:
+        allowed_prefixes:
+          - "search_emails"
+          - "read_email"
+          - "list_events"
+          - "get_messages"
+          - "gmail"
+          - "calendar"
+        requires_approval: []
+      drafts:
+        allowed_prefixes:
+          - "search_emails"
+          - "read_email"
+          - "draft_email"
+          - "list_events"
+          - "create_event"
+          - "gmail"
+          - "calendar"
+        requires_approval:
+          - "draft_email"
+          - "create_event"
+      controlled:
+        allowed_prefixes:
+          - "*"
+        requires_approval:
+          - "send_email"
+          - "delete_email"
+          - "send_message"

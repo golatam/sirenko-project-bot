@@ -1,0 +1,101 @@
+"""Точка входа: запуск бота + MCP-серверов."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import signal
+import sys
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from src.agent.core import AgentCore
+from src.bot.handlers import approvals, commands, queries
+from src.bot.middlewares.auth import AuthMiddleware
+from src.bot.middlewares.project_context import ProjectContextMiddleware
+from src.db.database import Database
+from src.mcp.manager import MCPManager
+from src.settings import load_settings
+from src.utils.logging import setup_logging
+
+logger = logging.getLogger(__name__)
+
+
+async def main() -> None:
+    setup_logging()
+
+    # --- Конфигурация ---
+    settings = load_settings()
+
+    if not settings.telegram_bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN не задан")
+        sys.exit(1)
+    if not settings.anthropic_api_key:
+        logger.error("ANTHROPIC_API_KEY не задан")
+        sys.exit(1)
+
+    # --- База данных ---
+    db = Database(settings.global_config.db_path)
+    await db.connect()
+
+    # --- MCP ---
+    mcp_manager = MCPManager(settings)
+    try:
+        await mcp_manager.start_all()
+    except Exception:
+        logger.exception("Ошибка запуска MCP-серверов")
+        # Продолжаем работу — бот может быть полезен и без MCP
+
+    # --- Агент ---
+    agent = AgentCore(settings, db, mcp_manager)
+
+    # --- Telegram Bot ---
+    bot = Bot(
+        token=settings.telegram_bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    dp = Dispatcher(storage=MemoryStorage())
+
+    # Middlewares
+    dp.message.middleware(AuthMiddleware(settings))
+    dp.callback_query.middleware(AuthMiddleware(settings))
+    dp.message.middleware(ProjectContextMiddleware(settings))
+    dp.callback_query.middleware(ProjectContextMiddleware(settings))
+
+    # Роутеры (порядок важен — commands до queries)
+    dp.include_router(commands.router)
+    dp.include_router(approvals.router)
+    dp.include_router(queries.router)  # Catch-all для свободного текста — последний
+
+    # Dependency injection через workflow_data
+    dp.workflow_data.update({
+        "settings": settings,
+        "db": db,
+        "agent": agent,
+        "mcp_manager": mcp_manager,
+    })
+
+    # --- Graceful Shutdown ---
+    async def shutdown() -> None:
+        logger.info("Остановка...")
+        await mcp_manager.stop_all()
+        await db.close()
+        await bot.session.close()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
+
+    # --- Запуск ---
+    logger.info("Бот запускается (long-polling)...")
+    try:
+        await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+    finally:
+        await shutdown()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
