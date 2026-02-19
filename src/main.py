@@ -13,7 +13,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from src.agent.core import AgentCore
-from src.bot.handlers import approvals, commands, queries
+from src.bot.handlers import approvals, auth, commands, project_management, queries
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.project_context import ProjectContextMiddleware
 from src.db.database import Database
@@ -67,6 +67,8 @@ async def main() -> None:
 
     # Роутеры (порядок важен — commands до queries)
     dp.include_router(commands.router)
+    dp.include_router(project_management.router)
+    dp.include_router(auth.router)
     dp.include_router(approvals.router)
     dp.include_router(queries.router)  # Catch-all для свободного текста — последний
 

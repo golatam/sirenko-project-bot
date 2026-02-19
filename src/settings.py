@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "projects.yaml"
@@ -85,6 +87,10 @@ class Settings(BaseModel):
 
 def load_settings(config_path: Path | None = None) -> Settings:
     """Загрузить настройки из YAML-файла и переменных окружения."""
+    # Загружаем .env из корня проекта
+    env_path = Path(__file__).parent.parent / ".env"
+    load_dotenv(env_path)
+
     path = config_path or CONFIG_PATH
 
     if path.exists():
@@ -106,3 +112,50 @@ def load_settings(config_path: Path | None = None) -> Settings:
         settings.global_config.db_path = db_path
 
     return settings
+
+
+def save_settings(settings: Settings, config_path: Path | None = None) -> None:
+    """Атомарно сохранить настройки в YAML (через tmp + rename)."""
+    path = config_path or CONFIG_PATH
+    data = {
+        "global": settings.global_config.model_dump(),
+        "projects": {
+            pid: proj.model_dump()
+            for pid, proj in settings.projects.items()
+        },
+    }
+    fd, tmp_path = tempfile.mkstemp(
+        dir=path.parent, suffix=".yaml.tmp", prefix=".projects_",
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
+
+
+def default_tool_policy(gmail_enabled: bool, calendar_enabled: bool) -> ToolPolicy:
+    """Сгенерировать стандартную ToolPolicy на основе включённых сервисов."""
+    prefixes_ro: list[str] = []
+    prefixes_drafts: list[str] = []
+    approval_drafts: list[str] = []
+    approval_controlled: list[str] = []
+
+    if gmail_enabled:
+        prefixes_ro.extend(["search_emails", "read_email", "gmail"])
+        prefixes_drafts.extend(["search_emails", "read_email", "draft_email", "gmail"])
+        approval_drafts.append("draft_email")
+        approval_controlled.extend(["send_email", "delete_email"])
+
+    if calendar_enabled:
+        prefixes_ro.extend(["list_events", "calendar"])
+        prefixes_drafts.extend(["list_events", "create_event", "calendar"])
+        approval_drafts.append("create_event")
+
+    return ToolPolicy(
+        read_only=ToolPolicyPhase(allowed_prefixes=prefixes_ro, requires_approval=[]),
+        drafts=ToolPolicyPhase(allowed_prefixes=prefixes_drafts, requires_approval=approval_drafts),
+        controlled=ToolPolicyPhase(allowed_prefixes=["*"], requires_approval=approval_controlled),
+    )

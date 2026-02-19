@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import AsyncExitStack
 from typing import Any
 
 from mcp import StdioServerParameters
@@ -23,16 +24,49 @@ class MCPManager:
         self.clients: dict[str, MCPClient] = {}  # client_id → MCPClient
         self.registry = ToolRegistry()
         self._project_clients: dict[str, list[str]] = {}  # project_id → [client_ids]
+        self._orphaned_stacks: list[AsyncExitStack] = []  # от удалённых проектов
 
     async def start_all(self) -> None:
         """Запустить MCP-серверы для всех проектов."""
         for project_id, project in self.settings.projects.items():
             await self._start_project_servers(project_id, project)
 
+    async def start_project(self, project_id: str, project: ProjectConfig) -> None:
+        """Запустить MCP-серверы для одного проекта (публичная обёртка)."""
+        await self._start_project_servers(project_id, project)
+
+    async def stop_project(self, project_id: str) -> None:
+        """Остановить и очистить MCP-серверы одного проекта.
+
+        Не вызывает disconnect (anyio cancel scopes ломают event loop
+        при вызове из хендлера). Отключаем клиент от реестра и чистим
+        состояние; exit_stack и дочерние процессы будут убиты при shutdown.
+        """
+        client_ids = self._project_clients.pop(project_id, [])
+        for cid in client_ids:
+            client = self.clients.pop(cid, None)
+            if client:
+                self.registry.unregister_client(client)
+                # Очищаем состояние без вызова exit_stack.aclose()
+                client._session = None
+                client._tools = []
+                # Сохраняем exit_stack для очистки при shutdown
+                if client._exit_stack:
+                    self._orphaned_stacks.append(client._exit_stack)
+                    client._exit_stack = None
+        logger.info("Проект '%s': остановлено %d MCP-серверов", project_id, len(client_ids))
+
     async def stop_all(self) -> None:
         """Остановить все MCP-серверы."""
         for client in self.clients.values():
             await client.disconnect()
+        # Закрываем orphaned stacks от удалённых проектов
+        for stack in self._orphaned_stacks:
+            try:
+                await stack.aclose()
+            except BaseException:
+                pass
+        self._orphaned_stacks.clear()
         self.clients.clear()
         self.registry.clear()
         self._project_clients.clear()

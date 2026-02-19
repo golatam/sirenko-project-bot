@@ -26,8 +26,23 @@ class ToolRegistry:
                     "Инструмент '%s' уже зарегистрирован от '%s', перезаписываю на '%s'",
                     tool_name, self._tool_to_client[tool_name].name, client.name,
                 )
+                # Убираем старую запись из _all_tools, чтобы не было дубликатов
+                self._all_tools = [t for t in self._all_tools if t["name"] != tool_name]
             self._tool_to_client[tool_name] = client
             self._all_tools.append(tool)
+
+    def unregister_client(self, client: MCPClient) -> None:
+        """Удалить все инструменты клиента из реестра."""
+        tools_to_remove = [
+            name for name, c in self._tool_to_client.items() if c is client
+        ]
+        for name in tools_to_remove:
+            del self._tool_to_client[name]
+        self._all_tools = [
+            t for t in self._all_tools if t["name"] not in tools_to_remove
+        ]
+        if tools_to_remove:
+            logger.info("Удалено %d инструментов клиента '%s'", len(tools_to_remove), client.name)
 
     def get_client_for_tool(self, tool_name: str) -> MCPClient | None:
         """Найти MCP-клиент для данного инструмента."""

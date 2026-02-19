@@ -1,9 +1,9 @@
 global:
-  owner_telegram_id: 123456789  # Заменить на реальный Telegram ID владельца
+  owner_telegram_id: 7664703896
   default_model: "claude-sonnet-4-6"
   complex_model: "claude-opus-4-6"
   max_tokens: 4096
-  phase: "read_only"  # read_only | drafts | controlled
+  phase: "read_only"
   db_path: "data/agent.db"
 
 projects:

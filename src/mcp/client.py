@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import signal
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -21,6 +24,7 @@ class MCPClient:
         self._session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
         self._tools: list[dict[str, Any]] = []
+        self._pid: int | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -59,15 +63,21 @@ class MCPClient:
 
     async def disconnect(self) -> None:
         """Остановить MCP-сервер."""
-        if self._exit_stack:
+        exit_stack = self._exit_stack
+        # Очищаем состояние сразу, чтобы клиент считался отключённым
+        self._session = None
+        self._exit_stack = None
+        self._tools = []
+        if exit_stack:
             try:
-                await self._exit_stack.aclose()
-            except Exception:
-                logger.exception("Ошибка при отключении MCP '%s'", self.name)
-            finally:
-                self._session = None
-                self._exit_stack = None
-                self._tools = []
+                await asyncio.wait_for(exit_stack.aclose(), timeout=5.0)
+            except BaseException:
+                # CancelledError (BaseException) + RuntimeError от anyio cancel scopes
+                logger.warning(
+                    "MCP '%s': корректное отключение не удалось, "
+                    "процесс будет остановлен при завершении бота",
+                    self.name,
+                )
 
     async def reconnect(self) -> None:
         """Переподключиться к серверу."""

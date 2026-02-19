@@ -53,3 +53,52 @@ def _get_phase_rules(phase: str) -> str:
         ),
     }
     return rules.get(phase, rules["read_only"])
+
+
+def generate_default_prompt_file(
+    project_id: str,
+    display_name: str,
+    description: str,
+    gmail: bool,
+    calendar: bool,
+) -> Path:
+    """Создать файл системного промпта из шаблона. Возвращает путь к файлу."""
+    capabilities: list[str] = []
+    if gmail:
+        capabilities.append("- Поиск и чтение email-переписки через Gmail")
+    if calendar:
+        capabilities.append("- Управление событиями в Google Calendar")
+    capabilities.append("- Форматирование ответов для удобного чтения в Telegram")
+
+    cap_block = "\n".join(capabilities)
+
+    content = (
+        f'Ты — персональный AI-ассистент для проекта "{display_name}".\n'
+        f"\n"
+        f"## Контекст проекта\n"
+        f"\n"
+        f"{description}\n"
+        f"\n"
+        f"## Твои возможности\n"
+        f"\n"
+        f"{cap_block}\n"
+        f"\n"
+        f"## Правила работы\n"
+        f"\n"
+        f"1. Всегда отвечай на языке запроса\n"
+        f"2. При работе с email — показывай краткую сводку, а не полный текст\n"
+        f"3. Конфиденциальная информация — не повторяй полные email-адреса или телефоны без необходимости\n"
+        f"4. Если нужно выполнить действие с побочными эффектами — запрашивай подтверждение\n"
+        f"\n"
+        f"## Формат ответов\n"
+        f"\n"
+        f"- Используй краткие, структурированные ответы\n"
+        f"- Для списков — нумерованные списки\n"
+        f"- Для важной информации — используй **жирный** текст\n"
+    )
+
+    prompts_dir = Path(__file__).parent.parent.parent / "config" / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = prompts_dir / f"{project_id}.md"
+    prompt_path.write_text(content, encoding="utf-8")
+    return prompt_path
