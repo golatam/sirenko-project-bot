@@ -68,9 +68,12 @@ class GlobalConfig(BaseModel):
     owner_telegram_id: int = 0
     default_model: str = "claude-sonnet-4-6"
     complex_model: str = "claude-opus-4-6"
-    max_tokens: int = 4096
+    max_tokens: int = 2048
     phase: str = "read_only"
     db_path: str = "data/agent.db"
+    # "api_key" — стандартный ANTHROPIC_API_KEY
+    # "oauth" — OAuth токен от подписки Claude (из macOS Keychain)
+    auth_method: str = "api_key"
 
 
 class Settings(BaseModel):
@@ -81,6 +84,7 @@ class Settings(BaseModel):
     # Переменные окружения (не из YAML)
     telegram_bot_token: str = ""
     anthropic_api_key: str = ""
+    anthropic_auth_token: str = ""  # OAuth токен от подписки
 
     model_config = {"populate_by_name": True}
 
@@ -110,6 +114,10 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     if db_path := os.environ.get("DB_PATH"):
         settings.global_config.db_path = db_path
+
+    # OAuth от подписки: читаем из .env (настраивается через python3.12 -m src.auth_setup)
+    if settings.global_config.auth_method == "oauth":
+        settings.anthropic_auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
 
     return settings
 
@@ -144,15 +152,25 @@ def default_tool_policy(gmail_enabled: bool, calendar_enabled: bool) -> ToolPoli
     approval_controlled: list[str] = []
 
     if gmail_enabled:
-        prefixes_ro.extend(["search_emails", "read_email", "gmail"])
-        prefixes_drafts.extend(["search_emails", "read_email", "draft_email", "gmail"])
+        prefixes_ro.extend(["search_emails", "read_email", "list_email_labels",
+                            "list_filters", "get_filter", "download_attachment"])
+        prefixes_drafts.extend(["search_emails", "read_email", "draft_email",
+                                "list_email_labels", "create_label", "get_or_create_label",
+                                "create_filter", "list_filters", "get_filter",
+                                "download_attachment"])
         approval_drafts.append("draft_email")
-        approval_controlled.extend(["send_email", "delete_email"])
+        approval_controlled.extend(["send_email", "delete_email", "modify_email",
+                                    "batch_modify_emails", "batch_delete_emails"])
 
     if calendar_enabled:
-        prefixes_ro.extend(["list_events", "calendar"])
-        prefixes_drafts.extend(["list_events", "create_event", "calendar"])
-        approval_drafts.append("create_event")
+        prefixes_ro.extend(["list-events", "search-events", "get-event",
+                            "list-calendars", "list-colors", "get-freebusy",
+                            "get-current-time"])
+        prefixes_drafts.extend(["list-events", "search-events", "get-event",
+                                "create-event", "list-calendars", "list-colors",
+                                "get-freebusy", "get-current-time"])
+        approval_drafts.append("create-event")
+        approval_controlled.extend(["update-event", "delete-event", "respond-to-event"])
 
     return ToolPolicy(
         read_only=ToolPolicyPhase(allowed_prefixes=prefixes_ro, requires_approval=[]),

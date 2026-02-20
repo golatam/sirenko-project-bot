@@ -33,7 +33,12 @@ async def main() -> None:
     if not settings.telegram_bot_token:
         logger.error("TELEGRAM_BOT_TOKEN не задан")
         sys.exit(1)
-    if not settings.anthropic_api_key:
+    if settings.global_config.auth_method == "oauth":
+        if not settings.anthropic_auth_token:
+            logger.error("OAuth токен не найден (Keychain / ANTHROPIC_AUTH_TOKEN)")
+            sys.exit(1)
+        logger.info("Auth: OAuth от подписки Claude (%s)", settings.global_config.auth_method)
+    elif not settings.anthropic_api_key:
         logger.error("ANTHROPIC_API_KEY не задан")
         sys.exit(1)
 
@@ -91,11 +96,20 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown()))
 
+    # --- Heartbeat для диагностики ---
+    async def heartbeat() -> None:
+        while True:
+            await asyncio.sleep(15)
+            logger.debug("[heartbeat] event loop alive")
+
+    hb_task = asyncio.create_task(heartbeat())
+
     # --- Запуск ---
     logger.info("Бот запускается (long-polling)...")
     try:
         await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
     finally:
+        hb_task.cancel()
         await shutdown()
 
 

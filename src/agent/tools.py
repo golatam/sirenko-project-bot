@@ -1,33 +1,48 @@
-"""Конвертация MCP-инструментов в формат Anthropic API."""
+"""Конвертация MCP-инструментов в формат Anthropic API с минимизацией токенов."""
 
 from __future__ import annotations
 
+import copy
 from typing import Any
+
+# Лимит длины description для экономии токенов
+MAX_DESCRIPTION_LENGTH = 100
 
 
 def mcp_tools_to_anthropic(mcp_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Преобразовать список MCP-инструментов в формат tools для Anthropic Messages API.
+    """Преобразовать MCP-инструменты в формат Anthropic API.
 
-    MCP формат:
-        {"name": "...", "description": "...", "input_schema": {...}}
-
-    Anthropic формат:
-        {"name": "...", "description": "...", "input_schema": {...}}
-
-    Форматы практически идентичны, но мы валидируем и нормализуем.
+    Оптимизации:
+    - Обрезка description до MAX_DESCRIPTION_LENGTH символов
+    - Удаление description из properties в input_schema
     """
     anthropic_tools = []
     for tool in mcp_tools:
-        schema = tool.get("input_schema", {})
-        # Гарантируем наличие обязательных полей schema
-        if "type" not in schema:
-            schema["type"] = "object"
-        if "properties" not in schema:
-            schema["properties"] = {}
+        schema = _minimize_schema(tool.get("input_schema", {}))
+
+        description = tool.get("description", tool["name"])
+        if len(description) > MAX_DESCRIPTION_LENGTH:
+            description = description[:MAX_DESCRIPTION_LENGTH].rstrip() + "…"
 
         anthropic_tools.append({
             "name": tool["name"],
-            "description": tool.get("description", f"Инструмент: {tool['name']}"),
+            "description": description,
             "input_schema": schema,
         })
     return anthropic_tools
+
+
+def _minimize_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Убрать лишние поля из input_schema для экономии токенов."""
+    schema = copy.deepcopy(schema)
+    if "type" not in schema:
+        schema["type"] = "object"
+    if "properties" not in schema:
+        schema["properties"] = {}
+
+    # Удаляем description из каждого property
+    for prop in schema.get("properties", {}).values():
+        if isinstance(prop, dict):
+            prop.pop("description", None)
+
+    return schema

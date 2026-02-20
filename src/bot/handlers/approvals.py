@@ -37,10 +37,25 @@ async def on_approve(callback: CallbackQuery, db: Database = None,
     messages_snapshot = json.loads(approval_req.conversation_context) if approval_req.conversation_context else []
     tool_input = json.loads(approval_req.tool_input)
 
+    # Извлекаем tool_use_id из messages_snapshot (последнее assistant-сообщение)
+    tool_use_id = ""
+    for msg in reversed(messages_snapshot):
+        if msg.get("role") == "assistant":
+            for block in msg.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == approval_req.tool_name:
+                    tool_use_id = block.get("id", "")
+                    break
+            if tool_use_id:
+                break
+    if not tool_use_id:
+        # Fallback: генерируем валидный ID
+        import uuid
+        tool_use_id = f"toolu_{uuid.uuid4().hex[:24]}"
+
     pending = PendingApproval(
         tool_name=approval_req.tool_name,
         tool_input=tool_input,
-        tool_use_id="",  # ID уже не нужен для повторного вызова — создадим новый цикл
+        tool_use_id=tool_use_id,
         messages_snapshot=messages_snapshot,
     )
 

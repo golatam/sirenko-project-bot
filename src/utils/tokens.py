@@ -11,8 +11,8 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    # Используем среднее значение ~3.5 символа на токен
-    return max(1, len(text) // 3)
+    # Консервативная оценка: ~2.5 символа на токен (русский + JSON)
+    return max(1, int(len(text) / 2.5))
 
 
 def format_cost(cost_usd: float) -> str:

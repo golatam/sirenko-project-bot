@@ -23,7 +23,7 @@ def build_messages_from_history(history: list[Conversation]) -> list[dict[str, A
     return messages
 
 
-def trim_messages(messages: list[dict[str, Any]], max_tokens: int = 150_000) -> list[dict[str, Any]]:
+def trim_messages(messages: list[dict[str, Any]], max_tokens: int = 4_000) -> list[dict[str, Any]]:
     """Обрезать историю сообщений, чтобы уложиться в лимит токенов.
 
     Стратегия: сохраняем системный промпт + последние N сообщений.

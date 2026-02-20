@@ -34,6 +34,7 @@ from src.settings import Settings
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_ITERATIONS = 15
+MAX_TOKENS_BUDGET = 50_000  # Лимит по токенам на один запрос пользователя
 
 
 @dataclass
@@ -64,7 +65,25 @@ class AgentCore:
         self.settings = settings
         self.db = db
         self.mcp = mcp_manager
-        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        self.client = self._create_client(settings)
+
+    @staticmethod
+    def _create_client(settings: Settings) -> anthropic.AsyncAnthropic:
+        """Создать Anthropic-клиент с учётом метода авторизации."""
+        if settings.global_config.auth_method == "oauth" and settings.anthropic_auth_token:
+            logger.info("Используем OAuth от подписки Claude")
+            return anthropic.AsyncAnthropic(
+                auth_token=settings.anthropic_auth_token,
+                max_retries=2,
+                timeout=60.0,
+                default_headers={"anthropic-beta": "oauth-2025-04-20"},
+            )
+        logger.info("Используем API key")
+        return anthropic.AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            max_retries=2,
+            timeout=60.0,
+        )
 
     async def run(
         self,
@@ -98,7 +117,7 @@ class AgentCore:
         system_prompt = build_system_prompt(project_id, project, phase)
 
         # 2. История из БД
-        history = await get_conversation_history(self.db, project_id, limit=50)
+        history = await get_conversation_history(self.db, project_id, limit=20)
         messages = build_messages_from_history(history)
 
         # === Оптимизация 3: Summarization ===
@@ -119,6 +138,12 @@ class AgentCore:
                     if any(t["name"].startswith(p) for p in prefixes)
                 ] or project_tools  # fallback: все инструменты если фильтр пустой
             anthropic_tools = mcp_tools_to_anthropic(project_tools)
+            logger.info(
+                "Инструменты: %d из %d (префиксы: %s)",
+                len(anthropic_tools),
+                len(self.mcp.get_project_tools(project_id)),
+                classification.tool_prefixes if classification.categories else "все",
+            )
         else:
             anthropic_tools = []
 
@@ -131,8 +156,38 @@ class AgentCore:
         total_cache_write = 0
         tool_calls_count = 0
 
+        # Логируем размер запроса для диагностики
+        from src.utils.tokens import estimate_tokens
+        est_sys = estimate_tokens(system_prompt)
+        est_msgs = sum(
+            estimate_tokens(str(m.get("content", ""))) + 10 for m in messages
+        )
+        est_tools = sum(
+            estimate_tokens(str(t)) for t in anthropic_tools
+        ) if anthropic_tools else 0
+        logger.info(
+            "Размер запроса: system~%d + msgs~%d + tools~%d = ~%d tokens",
+            est_sys, est_msgs, est_tools, est_sys + est_msgs + est_tools,
+        )
+
         for iteration in range(MAX_TOOL_ITERATIONS):
-            logger.debug("Итерация %d, сообщений: %d", iteration, len(messages))
+            logger.info("Итерация %d/%d, сообщений: %d, токены: %d",
+                        iteration + 1, MAX_TOOL_ITERATIONS, len(messages),
+                        total_input + total_output)
+
+            # Проверка бюджета токенов
+            if total_input + total_output > MAX_TOKENS_BUDGET:
+                logger.warning("Бюджет токенов исчерпан (%d > %d)",
+                               total_input + total_output, MAX_TOKENS_BUDGET)
+                # Финальный вызов без tools — пусть Claude подведёт итог
+                response = await self._call_claude(
+                    model=model, system=system_prompt,
+                    messages=messages, tools=None,
+                )
+                total_input += response.usage.input_tokens
+                total_output += response.usage.output_tokens
+                text = self._extract_text(response) or "Бюджет токенов исчерпан. Вот что удалось выяснить."
+                break
 
             response = await self._call_claude(
                 model=model,
@@ -199,19 +254,32 @@ class AgentCore:
                         )
                         result_text = error_msg
 
+                    # Обрезаем результат чтобы не раздувать контекст
+                    truncated = self._truncate_tool_result(result_text)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
-                        "content": result_text,
+                        "content": truncated,
                     })
 
                 messages.append({"role": "user", "content": tool_results})
+
+                # Тримим messages если раздулись (сохраняем первое + последние)
+                messages = trim_messages(messages)
                 continue
 
             text = self._extract_text(response)
             break
         else:
-            text = "Достигнут лимит итераций агента. Попробуйте переформулировать запрос."
+            # Лимит итераций — финальный вызов без tools для подведения итога
+            logger.warning("Достигнут лимит итераций (%d)", MAX_TOOL_ITERATIONS)
+            response = await self._call_claude(
+                model=model, system=system_prompt,
+                messages=messages, tools=None,
+            )
+            total_input += response.usage.input_tokens
+            total_output += response.usage.output_tokens
+            text = self._extract_text(response) or "Достигнут лимит итераций."
 
         # 5. Сохраняем в БД
         await save_message(self.db, project_id, "user", json.dumps(user_message))
@@ -238,12 +306,12 @@ class AgentCore:
     async def _simple_response(
         self, project_id: str, project, user_message: str, phase: str,
     ) -> AgentResponse:
-        """Быстрый ответ на простой запрос через основную модель без tools.
+        """Быстрый ответ на простой запрос через Haiku без tools.
 
-        Экономия: нет tool definitions в запросе (~2000 токенов меньше).
+        Экономия: Haiku ($1/M vs $3/M) + нет tool definitions (~2000 токенов меньше).
         """
         system_prompt = build_system_prompt(project_id, project, phase)
-        model = self.settings.global_config.default_model
+        model = "claude-haiku-4-5"
 
         # Берём минимум истории для контекста
         history = await get_conversation_history(self.db, project_id, limit=6)
@@ -374,7 +442,18 @@ class AgentCore:
                 }
             kwargs["tools"] = cached_tools
 
-        return await self.client.messages.create(**kwargs)
+        logger.info("→ API вызов: model=%s, max_tokens=%d, msgs=%d, tools=%s",
+                    model, kwargs["max_tokens"], len(messages),
+                    len(tools) if tools else 0)
+        try:
+            result = await self.client.messages.create(**kwargs)
+            logger.info("← API ответ: input=%d, output=%d, stop=%s",
+                        result.usage.input_tokens, result.usage.output_tokens,
+                        result.stop_reason)
+            return result
+        except Exception as e:
+            logger.error("← API ошибка: %s", e)
+            raise
 
     def _get_available_categories(self, project_id: str) -> list[str]:
         """Определить доступные категории инструментов для проекта."""
@@ -390,6 +469,13 @@ class AgentCore:
         if project.telegram_monitor.enabled:
             categories.append("telegram")
         return categories
+
+    @staticmethod
+    def _truncate_tool_result(text: str, max_chars: int = 2000) -> str:
+        """Обрезать результат инструмента для экономии токенов."""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n...[обрезано]"
 
     @staticmethod
     def _extract_text(response: anthropic.types.Message) -> str:

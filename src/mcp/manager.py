@@ -102,8 +102,15 @@ class MCPManager:
         logger.info("Проект '%s': запущено %d MCP-серверов", project_id, len(client_ids))
 
     def _create_gmail_client(self, client_id: str, project: ProjectConfig) -> MCPClient:
-        """Создать MCP-клиент для Gmail."""
+        """Создать MCP-клиент для Gmail.
+
+        MCP-сервер @gongrzhe/server-gmail-autoauth-mcp использует:
+        - GMAIL_OAUTH_PATH — путь к OAuth client keys (credentials.json)
+        - GMAIL_CREDENTIALS_PATH — путь к сохранённому токену (token.json)
+        """
         creds_dir = os.path.abspath(project.gmail.credentials_dir)
+        oauth_path = os.path.join(creds_dir, "credentials.json")
+        token_path = os.path.join(creds_dir, "token.json")
         return MCPClient(
             name=client_id,
             server_params=StdioServerParameters(
@@ -111,7 +118,8 @@ class MCPManager:
                 args=["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
                 env={
                     **os.environ,
-                    "GMAIL_CREDENTIALS_DIR": creds_dir,
+                    "GMAIL_OAUTH_PATH": oauth_path,
+                    "GMAIL_CREDENTIALS_PATH": token_path,
                 },
             ),
         )

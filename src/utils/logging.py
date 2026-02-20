@@ -15,6 +15,6 @@ def setup_logging(level: str = "INFO") -> None:
         stream=sys.stdout,
     )
     # Уменьшаем шум от библиотек
-    logging.getLogger("aiogram").setLevel(logging.WARNING)
+    logging.getLogger("aiogram").setLevel(logging.INFO)
     logging.getLogger("aiosqlite").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)

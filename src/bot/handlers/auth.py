@@ -71,10 +71,24 @@ async def _exchange_code(client: dict, auth_code: str) -> dict | None:
             return None
 
 
-def _save_token(token_data: dict, token_path: Path) -> None:
-    """Сохранить token.json в формате, совместимом с Gmail MCP."""
+def _save_token(token_data: dict, client: dict, token_path: Path) -> None:
+    """Сохранить token.json в формате googleapis OAuth2Client.
+
+    MCP-сервер @gongrzhe/server-gmail-autoauth-mcp использует
+    OAuth2Client.setCredentials(), который ожидает формат с expiry_date.
+    OAuth-ключи (client_id/secret) сервер берёт из credentials.json отдельно.
+    """
+    import time
+    expires_in = token_data.get("expires_in", 3599)
+    token = {
+        "access_token": token_data["access_token"],
+        "refresh_token": token_data["refresh_token"],
+        "scope": token_data.get("scope", ""),
+        "token_type": token_data.get("token_type", "Bearer"),
+        "expiry_date": int(time.time() * 1000) + expires_in * 1000,
+    }
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(json.dumps(token_data, indent=2))
+    token_path.write_text(json.dumps(token, indent=2))
 
 
 @router.message(Command("authgmail"))
@@ -216,7 +230,7 @@ async def on_auth_url(message: Message, state: FSMContext,
         return
 
     token_path = Path(project.gmail.credentials_dir) / "token.json"
-    _save_token(token_data, token_path)
+    _save_token(token_data, client, token_path)
 
     await state.clear()
     await message.answer(

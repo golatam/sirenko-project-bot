@@ -40,9 +40,13 @@ class RequestClassification:
         """Преобразовать категории в префиксы для фильтрации инструментов."""
         prefix_map = {
             "gmail": ["search_emails", "read_email", "draft_email", "send_email",
-                       "gmail", "list_email", "get_email"],
-            "calendar": ["list_events", "create_event", "update_event", "delete_event",
-                         "calendar", "get_event", "freebusy"],
+                       "modify_email", "delete_email", "list_email", "batch_",
+                       "create_label", "update_label", "delete_label", "get_or_create_label",
+                       "create_filter", "list_filters", "get_filter", "delete_filter",
+                       "download_attachment"],
+            "calendar": ["list-events", "search-events", "get-event", "create-event",
+                         "update-event", "delete-event", "get-freebusy", "get-current-time",
+                         "list-calendars", "list-colors", "respond-to-event", "manage-accounts"],
             "telegram": ["get_messages", "send_message", "search_messages",
                          "telegram", "get_contacts", "get_chats"],
         }
