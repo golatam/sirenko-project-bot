@@ -4,6 +4,8 @@
   CRED_GOOGLE_CREDENTIALS       → credentials/google/credentials.json
   CRED_FLEXIFY_GMAIL_CREDENTIALS → credentials/flexify/gmail/credentials.json
   CRED_FLEXIFY_GMAIL_TOKEN       → credentials/flexify/gmail/token.json
+  CRED_CALENDAR_KEYS             → credentials/calendar/gcp-oauth.keys.json
+  CRED_CALENDAR_TOKENS           → credentials/calendar/tokens.json
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ _CRED_MAP: dict[str, str] = {
     "CRED_GOOGLE_CREDENTIALS": "credentials/google/credentials.json",
     "CRED_FLEXIFY_GMAIL_CREDENTIALS": "credentials/flexify/gmail/credentials.json",
     "CRED_FLEXIFY_GMAIL_TOKEN": "credentials/flexify/gmail/token.json",
+    "CRED_CALENDAR_KEYS": "credentials/calendar/gcp-oauth.keys.json",
+    "CRED_CALENDAR_TOKENS": "credentials/calendar/tokens.json",
 }
 
 
@@ -43,6 +47,14 @@ def bootstrap_credentials() -> None:
             logger.info("Credentials: %s → %s", env_var, rel_path)
         except Exception:
             logger.exception("Ошибка декодирования %s", env_var)
+
+    # Calendar MCP: установить env vars с путями к credentials/token
+    cal_keys = PROJECT_ROOT / "credentials" / "calendar" / "gcp-oauth.keys.json"
+    cal_tokens = PROJECT_ROOT / "credentials" / "calendar" / "tokens.json"
+    if cal_keys.exists():
+        os.environ.setdefault("GOOGLE_OAUTH_CREDENTIALS", str(cal_keys))
+    if cal_tokens.exists():
+        os.environ.setdefault("GOOGLE_CALENDAR_MCP_TOKEN_PATH", str(cal_tokens))
 
     if restored:
         logger.info("Bootstrap credentials: восстановлено %d файлов", restored)
