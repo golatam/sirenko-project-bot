@@ -13,6 +13,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from src.agent.core import AgentCore
+from src.bootstrap_credentials import bootstrap_credentials
 from src.bot.handlers import approvals, auth, commands, project_management, queries
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.project_context import ProjectContextMiddleware
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 async def main() -> None:
     setup_logging()
+
+    # --- Credentials из env vars (для контейнера) ---
+    bootstrap_credentials()
 
     # --- Конфигурация ---
     settings = load_settings()

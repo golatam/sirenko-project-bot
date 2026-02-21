@@ -11,7 +11,7 @@ from mcp import StdioServerParameters
 
 from src.mcp.client import MCPClient
 from src.mcp.registry import ToolRegistry
-from src.settings import ProjectConfig, Settings
+from src.settings import PROJECT_ROOT, ProjectConfig, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class MCPManager:
         - GMAIL_OAUTH_PATH — путь к OAuth client keys (credentials.json)
         - GMAIL_CREDENTIALS_PATH — путь к сохранённому токену (token.json)
         """
-        creds_dir = os.path.abspath(project.gmail.credentials_dir)
+        creds_dir = str(PROJECT_ROOT / project.gmail.credentials_dir)
         oauth_path = os.path.join(creds_dir, "credentials.json")
         token_path = os.path.join(creds_dir, "token.json")
         return MCPClient(

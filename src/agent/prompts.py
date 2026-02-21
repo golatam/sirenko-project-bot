@@ -5,15 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from src.settings import ProjectConfig
+from src.settings import PROJECT_ROOT, ProjectConfig
 
 
 def build_system_prompt(project_id: str, project: ProjectConfig, phase: str) -> str:
     """Собрать системный промпт из файла + контекст проекта + правила фазы."""
     parts: list[str] = []
 
-    # 1. Базовый промпт из файла
+    # 1. Базовый промпт из файла (поддержка относительных путей через PROJECT_ROOT)
     prompt_path = Path(project.system_prompt_file)
+    if not prompt_path.is_absolute():
+        prompt_path = PROJECT_ROOT / prompt_path
     if prompt_path.exists():
         parts.append(prompt_path.read_text().strip())
     else:
@@ -97,8 +99,9 @@ def generate_default_prompt_file(
         f"- Для важной информации — используй **жирный** текст\n"
     )
 
-    prompts_dir = Path(__file__).parent.parent.parent / "config" / "prompts"
+    prompts_dir = PROJECT_ROOT / "config" / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     prompt_path = prompts_dir / f"{project_id}.md"
     prompt_path.write_text(content, encoding="utf-8")
-    return prompt_path
+    # Возвращаем относительный путь для сохранения в YAML
+    return prompt_path.relative_to(PROJECT_ROOT)

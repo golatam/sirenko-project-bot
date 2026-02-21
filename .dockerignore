@@ -1,0 +1,13 @@
+.venv/
+.env
+.git/
+.gitignore
+data/
+credentials/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+README.md
+CLAUDE.md
+.claude/

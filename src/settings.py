@@ -11,7 +11,8 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-CONFIG_PATH = Path(__file__).parent.parent / "config" / "projects.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = PROJECT_ROOT / "config" / "projects.yaml"
 
 
 # --- Модели конфигурации ---
@@ -114,6 +115,10 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     if db_path := os.environ.get("DB_PATH"):
         settings.global_config.db_path = db_path
+
+    # Переопределение auth_method из env (для Railway: AUTH_METHOD=api_key)
+    if auth_method := os.environ.get("AUTH_METHOD"):
+        settings.global_config.auth_method = auth_method
 
     # OAuth от подписки: читаем из .env (настраивается через python3.12 -m src.auth_setup)
     if settings.global_config.auth_method == "oauth":
