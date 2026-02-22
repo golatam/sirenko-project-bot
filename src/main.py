@@ -16,12 +16,13 @@ from src.agent.core import AgentCore
 from src.bootstrap_credentials import bootstrap_credentials
 from src.bot.handlers import (
     approvals, auth, auth_atlassian, auth_slack, auth_telegram,
-    commands, mcp_management, project_management, queries,
+    commands, mcp_management, planning, project_management, queries,
 )
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.project_context import ProjectContextMiddleware
 from src.db.database import Database
 from src.mcp.manager import MCPManager
+from src.scheduler import Scheduler
 from src.settings import load_settings
 from src.utils.logging import setup_logging
 
@@ -85,8 +86,12 @@ async def main() -> None:
     dp.include_router(auth_slack.router)
     dp.include_router(auth_atlassian.router)
     dp.include_router(mcp_management.router)
+    dp.include_router(planning.router)
     dp.include_router(approvals.router)
     dp.include_router(queries.router)  # Catch-all для свободного текста — последний
+
+    # --- Планировщик ---
+    scheduler = Scheduler(settings=settings, agent=agent, bot=bot)
 
     # Dependency injection через workflow_data
     dp.workflow_data.update({
@@ -94,11 +99,13 @@ async def main() -> None:
         "db": db,
         "agent": agent,
         "mcp_manager": mcp_manager,
+        "scheduler": scheduler,
     })
 
     # --- Graceful Shutdown ---
     async def shutdown() -> None:
         logger.info("Остановка...")
+        await scheduler.stop()
         await mcp_manager.stop_all()
         await db.close()
         await bot.session.close()
@@ -114,6 +121,9 @@ async def main() -> None:
             logger.debug("[heartbeat] event loop alive")
 
     hb_task = asyncio.create_task(heartbeat())
+
+    # --- Планировщик: запуск фонового цикла ---
+    scheduler.start()
 
     # --- Регистрация команд в меню Telegram ---
     await bot.set_my_commands(commands.BOT_COMMANDS)

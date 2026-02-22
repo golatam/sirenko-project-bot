@@ -63,6 +63,12 @@ python3.12 -m pytest tests/
 - `src/bot/keyboards.py` — inline-клавиатуры (меню, help-навигация, MCP type/instance selectors)
 - `src/bot/middlewares/project_context.py` — инъекция активного проекта
 
+### Планировщик и отчёты
+- `src/scheduler/__init__.py` — экспорт Scheduler
+- `src/scheduler/scheduler.py` — asyncio-планировщик: утренний план, недельный отчёт по расписанию
+- `src/scheduler/prompts.py` — промпты для планирования дня/недели и отчётов
+- `src/bot/handlers/planning.py` — /planday, /planweek, /report (ручной запуск)
+
 ### Конфигурация и данные
 - `src/settings.py` — конфигурация из YAML + env, save_settings, default_tool_policy, миграция legacy
 - `src/auth_setup.py` — настройка OAuth авторизации через Claude CLI → `.env`
@@ -88,7 +94,7 @@ python3.12 -m pytest tests/
 
 **Instance sharing**: один MCP-процесс обслуживает несколько проектов через refcount.
 
-## Telegram-команды бота (14)
+## Telegram-команды бота (17)
 
 | Команда | Описание |
 |---------|----------|
@@ -106,6 +112,9 @@ python3.12 -m pytest tests/
 | /authtelegram | Авторизация Telegram MCP (MTProto) |
 | /authslack | Авторизация Slack (xoxp-токен) |
 | /authatlassian | Авторизация Jira/Confluence |
+| /planday | План на сегодня (через агента с MCP) |
+| /planweek | План на неделю (через агента с MCP) |
+| /report | Отчёт за неделю (через агента с MCP) |
 
 Все команды зарегистрированы через `set_my_commands` — видны в меню Telegram при `/`.
 
@@ -159,8 +168,24 @@ projects:
       - flexify_gmail
       - flexify_calendar
       - flexify_slack
+    reporting:
+      enabled: true
+      daily_plan_time: "09:00"
+      weekly_report_day: friday
+      weekly_report_time: "18:00"
+      timezone: Europe/Moscow
     tool_policy: { ... }
 ```
+
+## Проактивное планирование и отчёты
+
+- **Настройка**: `reporting` секция в конфиге проекта (enabled/disabled per project)
+- **Планировщик**: asyncio-based, проверяет расписание каждую минуту
+- **Утренний план** (ежедневно в `daily_plan_time`): календарь на день + свежие письма + приоритеты
+- **План на неделю** (понедельник в `daily_plan_time`): вместо дневного плана — обзор всей недели
+- **Отчёт за неделю** (`weekly_report_day` в `weekly_report_time`): итоги — что сделано, встречи, переписки
+- **Ручные команды**: /planday, /planweek, /report — работают без включённого reporting
+- Все задачи выполняются через полноценный агентский цикл с MCP (реальные данные из почты/календаря)
 
 ## История и память
 

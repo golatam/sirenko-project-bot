@@ -48,6 +48,15 @@ class TelegramMonitorConfig(BaseModel):
     monitored_chats: list[MonitoredChat] = Field(default_factory=list)
 
 
+class ReportingConfig(BaseModel):
+    """Настройки проактивного планирования и отчётов."""
+    enabled: bool = False
+    daily_plan_time: str = "09:00"          # Время утреннего плана (HH:MM)
+    weekly_report_day: str = "friday"       # День недельного отчёта
+    weekly_report_time: str = "18:00"       # Время недельного отчёта (HH:MM)
+    timezone: str = "Europe/Moscow"         # Часовой пояс для расписания
+
+
 class ToolPolicyPhase(BaseModel):
     allowed_prefixes: list[str] = Field(default_factory=list)
     requires_approval: list[str] = Field(default_factory=list)
@@ -70,6 +79,7 @@ class ProjectConfig(BaseModel):
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     telegram_monitor: TelegramMonitorConfig = Field(default_factory=TelegramMonitorConfig)
     tool_policy: ToolPolicy = Field(default_factory=ToolPolicy)
+    reporting: ReportingConfig = Field(default_factory=ReportingConfig)
 
     def get_active_policy(self) -> ToolPolicyPhase:
         """Получить политику инструментов для текущей фазы."""

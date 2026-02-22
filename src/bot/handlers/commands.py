@@ -45,6 +45,9 @@ BOT_COMMANDS = [
     BotCommand(command="authatlassian", description="Авторизация Jira/Confluence"),
     BotCommand(command="addmcp", description="Подключить MCP-сервис"),
     BotCommand(command="removemcp", description="Отключить MCP-сервис"),
+    BotCommand(command="planday", description="План на сегодня"),
+    BotCommand(command="planweek", description="План на неделю"),
+    BotCommand(command="report", description="Отчёт за неделю"),
 ]
 
 
