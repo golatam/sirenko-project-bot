@@ -7,6 +7,90 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from src.settings import Settings
 
 
+# ---------------------------------------------------------------------------
+# Главное меню (кнопки на /start)
+# ---------------------------------------------------------------------------
+
+def start_menu_keyboard(has_project: bool = False) -> InlineKeyboardMarkup:
+    """Главное меню после /start."""
+    rows = [
+        [
+            InlineKeyboardButton(text="Выбрать проект", callback_data="menu:project"),
+            InlineKeyboardButton(text="Статус", callback_data="menu:status"),
+        ],
+        [
+            InlineKeyboardButton(text="Расходы", callback_data="menu:costs"),
+            InlineKeyboardButton(text="Очистить историю", callback_data="menu:clear"),
+        ],
+        [
+            InlineKeyboardButton(text="Управление проектами", callback_data="help:manage"),
+            InlineKeyboardButton(text="Авторизация", callback_data="help:auth"),
+        ],
+        [
+            InlineKeyboardButton(text="Справка", callback_data="menu:help"),
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ---------------------------------------------------------------------------
+# /help — навигация по категориям
+# ---------------------------------------------------------------------------
+
+def help_main_keyboard() -> InlineKeyboardMarkup:
+    """Основное меню справки — категории."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Основные", callback_data="help:main"),
+                InlineKeyboardButton(text="Управление", callback_data="help:manage"),
+            ],
+            [
+                InlineKeyboardButton(text="Авторизация", callback_data="help:auth"),
+                InlineKeyboardButton(text="Работа с агентом", callback_data="help:agent"),
+            ],
+        ]
+    )
+
+
+def help_category_keyboard(category: str) -> InlineKeyboardMarkup:
+    """Кнопки внутри категории справки — быстрые действия + назад."""
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if category == "main":
+        rows = [
+            [
+                InlineKeyboardButton(text="Выбрать проект", callback_data="menu:project"),
+                InlineKeyboardButton(text="Статус", callback_data="menu:status"),
+            ],
+            [
+                InlineKeyboardButton(text="Расходы", callback_data="menu:costs"),
+                InlineKeyboardButton(text="Очистить историю", callback_data="menu:clear"),
+            ],
+        ]
+    elif category == "manage":
+        rows = [
+            [
+                InlineKeyboardButton(text="Создать проект", callback_data="menu:addproject"),
+                InlineKeyboardButton(text="Удалить проект", callback_data="menu:deleteproject"),
+            ],
+        ]
+    elif category == "auth":
+        rows = [
+            [
+                InlineKeyboardButton(text="Gmail", callback_data="menu:authgmail"),
+                InlineKeyboardButton(text="Telegram", callback_data="menu:authtelegram"),
+            ],
+            [
+                InlineKeyboardButton(text="Slack", callback_data="menu:authslack"),
+                InlineKeyboardButton(text="Atlassian", callback_data="menu:authatlassian"),
+            ],
+        ]
+
+    rows.append([InlineKeyboardButton(text="<< Назад к справке", callback_data="help:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def project_selector(settings: Settings) -> InlineKeyboardMarkup:
     """Клавиатура выбора проекта."""
     buttons = []

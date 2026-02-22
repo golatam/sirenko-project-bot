@@ -114,6 +114,10 @@ async def main() -> None:
 
     hb_task = asyncio.create_task(heartbeat())
 
+    # --- Регистрация команд в меню Telegram ---
+    await bot.set_my_commands(commands.BOT_COMMANDS)
+    logger.info("Зарегистрировано %d команд в меню Telegram", len(commands.BOT_COMMANDS))
+
     # --- Запуск ---
     logger.info("Бот запускается (long-polling)...")
     try:
