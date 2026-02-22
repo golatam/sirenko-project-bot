@@ -27,3 +27,10 @@ class DeleteProjectStates(StatesGroup):
 class AuthGmailStates(StatesGroup):
     """FSM для /authgmail."""
     waiting_url = State()
+
+
+class AuthTelegramStates(StatesGroup):
+    """FSM для /authtelegram."""
+    api_id = State()
+    api_hash = State()
+    session_string = State()

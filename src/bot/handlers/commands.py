@@ -93,6 +93,7 @@ async def cmd_help(message: Message, **kwargs) -> None:
         f"/addproject — Создать новый проект\n"
         f"/deleteproject — Удалить проект\n"
         f"/authgmail — Авторизация Gmail для проекта\n"
+        f"/authtelegram — Авторизация Telegram MCP для проекта\n"
         f"/status — Статус текущего проекта\n"
         f"/clear — Очистить историю разговора\n"
         f"/costs — Расходы за последние 7 дней\n"

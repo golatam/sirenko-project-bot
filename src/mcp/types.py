@@ -24,12 +24,16 @@ class McpInstanceConfig(BaseModel):
     # Произвольные параметры для конкретного типа сервера
     credentials_dir: str = ""
     account_id: str = ""
+    # Путь к локальному серверу (для клонированных репо, запуск через uv)
+    server_dir: str = ""
     # Atlassian
     site_name: str = ""
     user_email: str = ""
     api_token_env: str = ""
-    # Telegram
-    session_string_env: str = ""
+    # Telegram (chigwell/telegram-mcp)
+    api_id_env: str = ""      # имя env var для TELEGRAM_API_ID
+    api_hash_env: str = ""    # имя env var для TELEGRAM_API_HASH
+    session_string_env: str = ""  # имя env var для TELEGRAM_SESSION_STRING
     # Slack
     token_env: str = ""
 
@@ -118,16 +122,25 @@ MCP_TYPE_META: dict[McpServerType, McpTypeMeta] = {
     McpServerType.telegram: McpTypeMeta(
         category="telegram",
         display_name="Telegram",
-        capability_description="Чтение и отправка сообщений в Telegram-чатах",
+        capability_description="Чтение и отправка сообщений в Telegram-чатах (MTProto User API)",
+        # 87 инструментов от chigwell/telegram-mcp.
+        # Используем широкие префиксы: get_/list_/search_/resolve_ → все read tools.
         tool_prefixes_read=[
-            "get_chats", "list_chats", "get_messages",
-            "search_messages", "get_contacts",
+            "get_", "list_", "search_", "resolve_", "export_contacts",
         ],
         tool_prefixes_write=[
-            "send_message",
+            "send_", "reply_", "edit_", "delete_", "forward_",
+            "create_", "pin_", "unpin_", "mark_", "ban_", "unban_",
+            "promote_", "demote_", "invite_", "leave_", "join_",
+            "subscribe_", "import_", "block_", "unblock_",
+            "save_", "clear_", "set_", "update_", "mute_", "unmute_",
+            "archive_", "unarchive_", "add_", "remove_", "reorder_",
+            "press_", "export_chat_invite",
         ],
         approval_tools=[
-            "send_message",
+            "send_message", "delete_message", "ban_user", "leave_chat",
+            "create_group", "create_channel", "forward_message",
+            "block_user", "promote_admin", "demote_admin",
         ],
     ),
     McpServerType.whatsapp: McpTypeMeta(

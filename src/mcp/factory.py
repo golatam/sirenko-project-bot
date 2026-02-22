@@ -56,10 +56,29 @@ def _calendar_params(config: McpInstanceConfig) -> StdioServerParameters:
 
 
 def _telegram_params(config: McpInstanceConfig) -> StdioServerParameters:
-    """Telegram MCP: chigwell/telegram-mcp (Telethon/MTProto)."""
+    """Telegram MCP: chigwell/telegram-mcp (Telethon/MTProto).
+
+    Требует клонированный репозиторий (server_dir).
+    Запуск: uv --directory <server_dir> run main.py
+    Env: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING
+    """
     env = {**os.environ}
+    if config.api_id_env:
+        env["TELEGRAM_API_ID"] = os.environ.get(config.api_id_env, "")
+    if config.api_hash_env:
+        env["TELEGRAM_API_HASH"] = os.environ.get(config.api_hash_env, "")
     if config.session_string_env:
         env["TELEGRAM_SESSION_STRING"] = os.environ.get(config.session_string_env, "")
+
+    if config.server_dir:
+        # Локальный клонированный репозиторий
+        server_dir = str(PROJECT_ROOT / config.server_dir) if not os.path.isabs(config.server_dir) else config.server_dir
+        return StdioServerParameters(
+            command="uv",
+            args=["--directory", server_dir, "run", "main.py"],
+            env=env,
+        )
+    # Fallback: попытка через uvx (может не работать, т.к. пакет не на PyPI)
     return StdioServerParameters(
         command="uvx",
         args=["telegram-mcp"],
