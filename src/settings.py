@@ -97,6 +97,7 @@ class Settings(BaseModel):
     telegram_bot_token: str = ""
     anthropic_api_key: str = ""
     anthropic_auth_token: str = ""
+    anthropic_refresh_token: str = ""
 
     model_config = {"populate_by_name": True}
 
@@ -188,6 +189,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     if settings.global_config.auth_method == "oauth":
         settings.anthropic_auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+        settings.anthropic_refresh_token = os.environ.get("ANTHROPIC_REFRESH_TOKEN", "")
 
     return settings
 

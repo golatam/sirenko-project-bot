@@ -73,6 +73,15 @@ async def handle_query(
             user_message=message.text,
         )
         logger.info("[handler] agent.run завершён, text=%d chars", len(result.text or ""))
+    except anthropic.AuthenticationError:
+        stop_typing.set()
+        await typing_task
+        logger.exception("Auth ошибка для проекта '%s'", project_id)
+        await status_msg.edit_text(
+            "Ошибка аутентификации. OAuth токен истёк и не удалось обновить. "
+            "Перезапустите: python3.12 -m src.auth_setup"
+        )
+        return
     except anthropic.APIStatusError as e:
         stop_typing.set()
         await typing_task

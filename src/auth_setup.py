@@ -94,24 +94,34 @@ def extract_token() -> dict | None:
     }
 
 
-def save_to_env(token: str) -> None:
-    """Сохранить токен в .env файл."""
+def save_to_env(access_token: str, refresh_token: str = "") -> None:
+    """Сохранить access и refresh токены в .env файл."""
     lines: list[str] = []
-    token_saved = False
+    access_saved = False
+    refresh_saved = False
 
     if ENV_PATH.exists():
         for line in ENV_PATH.read_text().splitlines():
             if line.startswith("ANTHROPIC_AUTH_TOKEN="):
-                lines.append(f"ANTHROPIC_AUTH_TOKEN={token}")
-                token_saved = True
+                lines.append(f"ANTHROPIC_AUTH_TOKEN={access_token}")
+                access_saved = True
+            elif line.startswith("ANTHROPIC_REFRESH_TOKEN="):
+                if refresh_token:
+                    lines.append(f"ANTHROPIC_REFRESH_TOKEN={refresh_token}")
+                    refresh_saved = True
+                # Если refresh_token пуст — удаляем старую строку
             else:
                 lines.append(line)
 
-    if not token_saved:
-        lines.append(f"ANTHROPIC_AUTH_TOKEN={token}")
+    if not access_saved:
+        lines.append(f"ANTHROPIC_AUTH_TOKEN={access_token}")
+    if refresh_token and not refresh_saved:
+        lines.append(f"ANTHROPIC_REFRESH_TOKEN={refresh_token}")
 
     ENV_PATH.write_text("\n".join(lines) + "\n")
-    print(f"✓ Токен сохранён в {ENV_PATH}")
+    print(f"✓ Access token сохранён в {ENV_PATH}")
+    if refresh_token:
+        print(f"✓ Refresh token сохранён в {ENV_PATH}")
 
 
 def main() -> None:
@@ -131,12 +141,15 @@ def main() -> None:
     if not token_data:
         sys.exit(1)
 
-    save_to_env(token_data["access_token"])
+    save_to_env(token_data["access_token"], token_data.get("refresh_token", ""))
 
     print(f"\n=== Готово ===")
     print(f"Убедитесь что в config/projects.yaml установлено:")
     print(f"  auth_method: oauth")
-    print(f"\nДля обновления токена запустите эту команду снова.")
+    if token_data.get("refresh_token"):
+        print(f"\nRefresh token сохранён — access_token будет обновляться автоматически.")
+    else:
+        print(f"\nRefresh token не найден — для обновления запустите эту команду снова.")
 
 
 if __name__ == "__main__":

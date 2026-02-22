@@ -16,6 +16,7 @@ from typing import Any
 
 import anthropic
 
+from src.agent.auth import OAuthRefreshError, OAuthRefresher
 from src.agent.classifier import RequestClassification, classify_request
 from src.agent.context import build_messages_from_history, trim_messages
 from src.agent.prompts import build_system_prompt
@@ -67,6 +68,11 @@ class AgentCore:
         self.db = db
         self.mcp = mcp_manager
         self.client = self._create_client(settings)
+        self._refresher: OAuthRefresher | None = (
+            OAuthRefresher(settings)
+            if settings.global_config.auth_method == "oauth"
+            else None
+        )
 
     @staticmethod
     def _create_client(settings: Settings) -> anthropic.AsyncAnthropic:
@@ -452,9 +458,26 @@ class AgentCore:
                         result.usage.input_tokens, result.usage.output_tokens,
                         result.stop_reason)
             return result
+        except anthropic.AuthenticationError:
+            if not self._refresher:
+                raise
+            # OAuth токен истёк — пробуем обновить и retry
+            logger.warning("← 401 AuthenticationError, пробуем refresh токена...")
+            await self._refresh_and_recreate_client()
+            result = await self.client.messages.create(**kwargs)
+            logger.info("← API ответ (после refresh): input=%d, output=%d, stop=%s",
+                        result.usage.input_tokens, result.usage.output_tokens,
+                        result.stop_reason)
+            return result
         except Exception as e:
             logger.error("← API ошибка: %s", e)
             raise
+
+    async def _refresh_and_recreate_client(self) -> None:
+        """Обновить OAuth токен и пересоздать Anthropic-клиент."""
+        await self._refresher.refresh()
+        self.client = self._create_client(self.settings)
+        logger.info("Anthropic-клиент пересоздан с новым токеном")
 
     def _get_available_categories(self, project_id: str) -> list[str]:
         """Определить доступные категории инструментов для проекта.
