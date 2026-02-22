@@ -87,10 +87,19 @@ def _telegram_params(config: McpInstanceConfig) -> StdioServerParameters:
 
 
 def _whatsapp_params(config: McpInstanceConfig) -> StdioServerParameters:
-    """WhatsApp MCP: jlucaso1/whatsapp-mcp-ts (Baileys)."""
+    """WhatsApp MCP: jlucaso1/whatsapp-mcp-ts (Baileys, Node >= 23.10).
+
+    Требует клонированный репозиторий (server_dir) и Node.js >= 23.10.
+    Запуск: node src/main.ts (из директории сервера).
+    Auth: QR-код при первом запуске → auth_info/ directory.
+    """
+    if not config.server_dir:
+        raise ValueError("WhatsApp MCP требует server_dir (путь к клонированному репозиторию)")
+
+    server_dir = str(PROJECT_ROOT / config.server_dir) if not os.path.isabs(config.server_dir) else config.server_dir
     return StdioServerParameters(
-        command="npx",
-        args=["-y", "whatsapp-mcp"],
+        command="node",
+        args=[os.path.join(server_dir, "src", "main.ts")],
         env={**os.environ},
     )
 

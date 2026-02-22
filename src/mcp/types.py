@@ -143,12 +143,15 @@ MCP_TYPE_META: dict[McpServerType, McpTypeMeta] = {
             "block_user", "promote_admin", "demote_admin",
         ],
     ),
+    # 7 инструментов от jlucaso1/whatsapp-mcp-ts (Baileys, Node >= 23.10)
+    # Не на npm — только git clone. QR-авторизация при первом запуске.
     McpServerType.whatsapp: McpTypeMeta(
         category="whatsapp",
         display_name="WhatsApp",
         capability_description="Чтение и отправка сообщений в WhatsApp",
         tool_prefixes_read=[
-            "get_chats", "search_messages", "get_messages",
+            "search_contacts", "list_messages", "list_chats",
+            "get_chat", "get_message_context", "search_messages",
         ],
         tool_prefixes_write=[
             "send_message",
