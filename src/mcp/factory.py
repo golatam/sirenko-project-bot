@@ -96,13 +96,19 @@ def _whatsapp_params(config: McpInstanceConfig) -> StdioServerParameters:
 
 
 def _slack_params(config: McpInstanceConfig) -> StdioServerParameters:
-    """Slack MCP: korotovsky/slack-mcp-server."""
+    """Slack MCP: korotovsky/slack-mcp-server (npm: slack-mcp-server).
+
+    Env: SLACK_MCP_XOXP_TOKEN (User OAuth Token, xoxp-*)
+    Опционально: SLACK_MCP_ADD_MESSAGE_TOOL=true для write tools.
+    """
     env = {**os.environ}
     if config.token_env:
-        env["SLACK_USER_TOKEN"] = os.environ.get(config.token_env, "")
+        env["SLACK_MCP_XOXP_TOKEN"] = os.environ.get(config.token_env, "")
+    # Включаем write tools (отправка сообщений, реакции)
+    env["SLACK_MCP_ADD_MESSAGE_TOOL"] = "true"
     return StdioServerParameters(
         command="npx",
-        args=["-y", "@anthropic/slack-mcp-server"],
+        args=["-y", "slack-mcp-server@latest", "--transport", "stdio"],
         env=env,
     )
 

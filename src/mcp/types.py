@@ -157,19 +157,27 @@ MCP_TYPE_META: dict[McpServerType, McpTypeMeta] = {
             "send_message",
         ],
     ),
+    # 14 инструментов от korotovsky/slack-mcp-server (npm: slack-mcp-server)
     McpServerType.slack: McpTypeMeta(
         category="slack",
         display_name="Slack",
-        capability_description="Чтение каналов и отправка сообщений в Slack",
+        capability_description="Чтение каналов, поиск сообщений и отправка в Slack",
         tool_prefixes_read=[
-            "list_channels", "read_channel", "search_messages",
-            "get_thread", "get_users",
+            "conversations_history", "conversations_replies",
+            "conversations_search_messages", "channels_list",
+            "users_search", "usergroups_list", "usergroups_me",
+            "attachment_get_data",
         ],
         tool_prefixes_write=[
-            "send_message", "reply_to_thread",
+            "conversations_add_message",
+            "reactions_add", "reactions_remove",
+            "usergroups_create", "usergroups_update",
+            "usergroups_users_update",
         ],
         approval_tools=[
-            "send_message", "reply_to_thread",
+            "conversations_add_message",
+            "usergroups_create", "usergroups_update",
+            "usergroups_users_update",
         ],
     ),
     McpServerType.confluence: McpTypeMeta(

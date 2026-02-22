@@ -34,3 +34,8 @@ class AuthTelegramStates(StatesGroup):
     api_id = State()
     api_hash = State()
     session_string = State()
+
+
+class AuthSlackStates(StatesGroup):
+    """FSM для /authslack."""
+    token = State()
