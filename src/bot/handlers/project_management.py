@@ -21,9 +21,8 @@ from src.bot.keyboards import (
 )
 from src.bot.states import AddProjectStates, DeleteProjectStates
 from src.mcp.manager import MCPManager
+from src.mcp.types import McpInstanceConfig, McpServerType
 from src.settings import (
-    CalendarConfig,
-    GmailConfig,
     ProjectConfig,
     Settings,
     default_tool_policy,
@@ -193,25 +192,42 @@ async def on_create_confirm(callback: CallbackQuery, state: FSMContext,
     calendar_enabled = data.get("calendar_enabled", False)
     google_account = data.get("google_account", "")
 
-    # Генерируем промпт-файл
-    prompt_path = generate_default_prompt_file(
-        pid, display_name, description, gmail_enabled, calendar_enabled,
-    )
+    # Создаём MCP instances и services
+    mcp_services: list[str] = []
+    enabled_types: list[McpServerType] = []
 
-    # Создаём директорию credentials для Gmail
-    creds_dir = ""
     if gmail_enabled:
+        instance_id = f"{pid}_gmail"
         creds_dir = f"credentials/{pid}/gmail"
         Path(creds_dir).mkdir(parents=True, exist_ok=True)
+        settings.global_config.mcp_instances[instance_id] = McpInstanceConfig(
+            type=McpServerType.gmail,
+            credentials_dir=creds_dir,
+        )
+        mcp_services.append(instance_id)
+        enabled_types.append(McpServerType.gmail)
 
-    # Собираем конфиг
+    if calendar_enabled:
+        instance_id = f"{pid}_calendar"
+        settings.global_config.mcp_instances[instance_id] = McpInstanceConfig(
+            type=McpServerType.calendar,
+            account_id=google_account,
+        )
+        mcp_services.append(instance_id)
+        enabled_types.append(McpServerType.calendar)
+
+    # Генерируем промпт-файл
+    prompt_path = generate_default_prompt_file(
+        pid, display_name, description, enabled_types=enabled_types,
+    )
+
+    # Собираем конфиг проекта
     project = ProjectConfig(
         display_name=display_name,
         phase="read_only",
         system_prompt_file=str(prompt_path),
-        gmail=GmailConfig(enabled=gmail_enabled, credentials_dir=creds_dir),
-        calendar=CalendarConfig(enabled=calendar_enabled, account_id=google_account),
-        tool_policy=default_tool_policy(gmail_enabled, calendar_enabled),
+        mcp_services=mcp_services,
+        tool_policy=default_tool_policy(enabled_types),
     )
 
     # Добавляем в settings (in-memory) + сохраняем YAML
@@ -245,7 +261,7 @@ async def on_create_confirm(callback: CallbackQuery, state: FSMContext,
     )
 
     # Запускаем MCP в фоне с timeout
-    if gmail_enabled or calendar_enabled:
+    if mcp_services:
         async def _start_mcp() -> None:
             try:
                 await asyncio.wait_for(
@@ -336,6 +352,18 @@ async def on_delete_confirm(callback: CallbackQuery, state: FSMContext,
 
     # Останавливаем MCP
     await mcp_manager.stop_project(pid)
+
+    # Удаляем MCP instances, принадлежащие только этому проекту
+    if project:
+        for instance_id in project.mcp_services:
+            # Проверяем, не используется ли instance другими проектами
+            used_by_others = any(
+                instance_id in p.mcp_services
+                for p_id, p in settings.projects.items()
+                if p_id != pid
+            )
+            if not used_by_others:
+                settings.global_config.mcp_instances.pop(instance_id, None)
 
     # Удаляем из settings (in-memory)
     settings.projects.pop(pid, None)

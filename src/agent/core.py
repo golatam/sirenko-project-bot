@@ -29,6 +29,7 @@ from src.db.queries import (
     track_cost,
 )
 from src.mcp.manager import MCPManager
+from src.mcp.types import MCP_TYPE_META
 from src.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -456,18 +457,23 @@ class AgentCore:
             raise
 
     def _get_available_categories(self, project_id: str) -> list[str]:
-        """Определить доступные категории инструментов для проекта."""
+        """Определить доступные категории инструментов для проекта.
+
+        Собирает категории из MCP_TYPE_META по типам инстансов,
+        привязанных к проекту через mcp_services.
+        """
         project = self.settings.projects.get(project_id)
         if not project:
             return []
 
-        categories = []
-        if project.gmail.enabled:
-            categories.append("gmail")
-        if project.calendar.enabled:
-            categories.append("calendar")
-        if project.telegram_monitor.enabled:
-            categories.append("telegram")
+        categories: list[str] = []
+        for instance_id in project.mcp_services:
+            inst = self.settings.global_config.mcp_instances.get(instance_id)
+            if not inst:
+                continue
+            meta = MCP_TYPE_META.get(inst.type)
+            if meta and meta.category not in categories:
+                categories.append(meta.category)
         return categories
 
     @staticmethod

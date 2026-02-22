@@ -1,4 +1,7 @@
-"""Haiku-классификатор запросов: определяет нужны ли инструменты и какие."""
+"""Haiku-классификатор запросов: определяет нужны ли инструменты и какие.
+
+Динамически формирует промпт на основе доступных категорий из MCP_TYPE_META.
+"""
 
 from __future__ import annotations
 
@@ -9,24 +12,58 @@ from typing import Any
 
 import anthropic
 
+from src.mcp.types import MCP_TYPE_META, TOOL_PREFIX_MAP, McpServerType
+
 logger = logging.getLogger(__name__)
 
 CLASSIFIER_MODEL = "claude-haiku-4-5"
 
-CLASSIFICATION_PROMPT = """Ты — классификатор запросов. Определи, что нужно для ответа на запрос пользователя.
 
-Доступные категории инструментов:
-- gmail: поиск, чтение email
-- calendar: события, расписание
-- telegram: сообщения, контакты в Telegram-чатах
-- none: инструменты не нужны, обычный разговор
+def _build_classification_prompt(available_categories: list[str]) -> str:
+    """Собрать промпт классификатора из доступных категорий."""
+    category_lines = []
+    for cat in available_categories:
+        # Ищем meta по category name
+        meta = None
+        for stype, m in MCP_TYPE_META.items():
+            if m.category == cat:
+                meta = m
+                break
+        if meta:
+            category_lines.append(f"- {cat}: {meta.capability_description}")
+        else:
+            category_lines.append(f"- {cat}")
 
-Ответь ТОЛЬКО валидным JSON без markdown:
-{"needs_tools": true/false, "categories": ["gmail", "calendar"], "is_simple": true/false}
+    category_lines.append("- none: инструменты не нужны, обычный разговор")
+    categories_block = "\n".join(category_lines)
 
-- needs_tools: нужны ли внешние инструменты для ответа
-- categories: какие категории нужны (пустой список если needs_tools=false)
-- is_simple: можно ли ответить коротко без глубокого анализа (приветствие, благодарность, ок, простой вопрос)"""
+    return (
+        "Ты — классификатор запросов. Определи, что нужно для ответа на запрос пользователя.\n\n"
+        f"Доступные категории инструментов:\n{categories_block}\n\n"
+        'Ответь ТОЛЬКО валидным JSON без markdown:\n'
+        '{"needs_tools": true/false, "categories": ["gmail", "calendar"], "is_simple": true/false}\n\n'
+        "- needs_tools: нужны ли внешние инструменты для ответа\n"
+        "- categories: какие категории нужны (пустой список если needs_tools=false)\n"
+        "- is_simple: можно ли ответить коротко без глубокого анализа "
+        "(приветствие, благодарность, ок, простой вопрос)"
+    )
+
+
+def _build_tool_prefixes(categories: list[str]) -> list[str]:
+    """Преобразовать категории в префиксы для фильтрации инструментов.
+
+    Собирает все tool_prefixes (read + write) из MCP_TYPE_META
+    с учётом namespace prefix из TOOL_PREFIX_MAP.
+    """
+    prefixes: list[str] = []
+    for cat in categories:
+        for stype, meta in MCP_TYPE_META.items():
+            if meta.category == cat:
+                ns_prefix = TOOL_PREFIX_MAP.get(stype, "")
+                for p in meta.all_prefixes:
+                    prefixes.append(ns_prefix + p if ns_prefix else p)
+                break
+    return prefixes
 
 
 @dataclass
@@ -38,22 +75,7 @@ class RequestClassification:
     @property
     def tool_prefixes(self) -> list[str]:
         """Преобразовать категории в префиксы для фильтрации инструментов."""
-        prefix_map = {
-            "gmail": ["search_emails", "read_email", "draft_email", "send_email",
-                       "modify_email", "delete_email", "list_email", "batch_",
-                       "create_label", "update_label", "delete_label", "get_or_create_label",
-                       "create_filter", "list_filters", "get_filter", "delete_filter",
-                       "download_attachment"],
-            "calendar": ["list-events", "search-events", "get-event", "create-event",
-                         "update-event", "delete-event", "get-freebusy", "get-current-time",
-                         "list-calendars", "list-colors", "respond-to-event", "manage-accounts"],
-            "telegram": ["get_messages", "send_message", "search_messages",
-                         "telegram", "get_contacts", "get_chats"],
-        }
-        prefixes = []
-        for cat in self.categories:
-            prefixes.extend(prefix_map.get(cat, [cat]))
-        return prefixes
+        return _build_tool_prefixes(self.categories)
 
 
 async def classify_request(
@@ -65,11 +87,13 @@ async def classify_request(
 
     Стоимость: ~200 input + ~50 output токенов = ~$0.0003
     """
+    prompt = _build_classification_prompt(available_categories)
+
     try:
         response = await client.messages.create(
             model=CLASSIFIER_MODEL,
             max_tokens=100,
-            system=CLASSIFICATION_PROMPT,
+            system=prompt,
             messages=[{
                 "role": "user",
                 "content": f"Доступные категории: {', '.join(available_categories)}\n\nЗапрос: {user_message}",
@@ -89,7 +113,6 @@ async def classify_request(
         )
     except Exception:
         logger.debug("Классификатор не смог разобрать ответ, используем все инструменты")
-        # Fallback: считаем что нужны все инструменты
         return RequestClassification(
             needs_tools=True,
             categories=available_categories,

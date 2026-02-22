@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from src.mcp.types import MCP_TYPE_META, McpServerType
 from src.settings import PROJECT_ROOT, ProjectConfig
 
 
@@ -61,15 +62,28 @@ def generate_default_prompt_file(
     project_id: str,
     display_name: str,
     description: str,
-    gmail: bool,
-    calendar: bool,
+    enabled_types: list[McpServerType] | None = None,
+    *,
+    gmail: bool = False,
+    calendar: bool = False,
 ) -> Path:
-    """Создать файл системного промпта из шаблона. Возвращает путь к файлу."""
+    """Создать файл системного промпта из шаблона. Возвращает путь к файлу.
+
+    Поддерживает как новый формат (enabled_types), так и legacy (gmail, calendar).
+    """
+    # Legacy compat
+    if enabled_types is None:
+        enabled_types = []
+        if gmail:
+            enabled_types.append(McpServerType.gmail)
+        if calendar:
+            enabled_types.append(McpServerType.calendar)
+
     capabilities: list[str] = []
-    if gmail:
-        capabilities.append("- Поиск и чтение email-переписки через Gmail")
-    if calendar:
-        capabilities.append("- Управление событиями в Google Calendar")
+    for stype in enabled_types:
+        meta = MCP_TYPE_META.get(stype)
+        if meta:
+            capabilities.append(f"- {meta.capability_description}")
     capabilities.append("- Форматирование ответов для удобного чтения в Telegram")
 
     cap_block = "\n".join(capabilities)

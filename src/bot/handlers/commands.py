@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from src.bot.keyboards import project_selector
 from src.db.database import Database
 from src.db.queries import clear_conversation, get_costs_summary
+from src.mcp.manager import MCPManager
 from src.settings import Settings
 from src.utils.formatting import bold, code, escape
 from src.utils.tokens import format_cost, format_tokens
@@ -107,7 +108,8 @@ async def cmd_help(message: Message, **kwargs) -> None:
 
 @router.message(Command("status"))
 async def cmd_status(message: Message, project_id: str | None = None,
-                     settings: Settings = None, **kwargs) -> None:
+                     settings: Settings = None, mcp_manager: MCPManager = None,
+                     **kwargs) -> None:
     """Статус текущего проекта."""
     if not project_id:
         await message.answer("Проект не выбран. Используй /project.")
@@ -118,14 +120,25 @@ async def cmd_status(message: Message, project_id: str | None = None,
         await message.answer(f"Проект '{project_id}' не найден.")
         return
 
+    # MCP instances
+    services_lines: list[str] = []
+    for iid in project.mcp_services:
+        inst = settings.global_config.mcp_instances.get(iid)
+        if inst:
+            running = iid in mcp_manager.instances if mcp_manager else False
+            status = "запущен" if running else "остановлен"
+            services_lines.append(f"  {inst.type.value}: {status} ({code(iid)})")
+        else:
+            services_lines.append(f"  {code(iid)}: не найден")
+
+    services_block = "\n".join(services_lines) if services_lines else "  нет"
+
     await message.answer(
         f"{bold('Статус проекта')}\n\n"
         f"Проект: {bold(project.display_name)}\n"
         f"ID: {code(project_id)}\n"
-        f"Фаза: {code(project.phase)}\n"
-        f"Gmail: {'включён' if project.gmail.enabled else 'отключён'}\n"
-        f"Calendar: {'включён' if project.calendar.enabled else 'отключён'}\n"
-        f"TG Monitor: {'включён' if project.telegram_monitor.enabled else 'отключён'}",
+        f"Фаза: {code(project.phase)}\n\n"
+        f"{bold('MCP-сервисы:')}\n{services_block}",
         parse_mode="HTML",
     )
 

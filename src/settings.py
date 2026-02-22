@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -11,19 +12,25 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from src.mcp.types import MCP_TYPE_META, McpInstanceConfig, McpServerType, TOOL_PREFIX_MAP
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "projects.yaml"
+
+logger = logging.getLogger(__name__)
 
 
 # --- Модели конфигурации ---
 
 
 class GmailConfig(BaseModel):
+    """Legacy: конфигурация Gmail (для backward compat)."""
     enabled: bool = False
     credentials_dir: str = ""
 
 
 class CalendarConfig(BaseModel):
+    """Legacy: конфигурация Calendar (для backward compat)."""
     enabled: bool = False
     account_id: str = ""
 
@@ -35,6 +42,7 @@ class MonitoredChat(BaseModel):
 
 
 class TelegramMonitorConfig(BaseModel):
+    """Legacy: конфигурация Telegram Monitor (для backward compat)."""
     enabled: bool = False
     session_string_env: str = ""
     monitored_chats: list[MonitoredChat] = Field(default_factory=list)
@@ -55,6 +63,9 @@ class ProjectConfig(BaseModel):
     display_name: str = ""
     phase: str = "read_only"
     system_prompt_file: str = ""
+    # Новый формат: ссылки на instance_id из global.mcp_instances
+    mcp_services: list[str] = Field(default_factory=list)
+    # Legacy поля (для backward compat при чтении YAML)
     gmail: GmailConfig = Field(default_factory=GmailConfig)
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     telegram_monitor: TelegramMonitorConfig = Field(default_factory=TelegramMonitorConfig)
@@ -72,9 +83,9 @@ class GlobalConfig(BaseModel):
     max_tokens: int = 2048
     phase: str = "read_only"
     db_path: str = "data/agent.db"
-    # "api_key" — стандартный ANTHROPIC_API_KEY
-    # "oauth" — OAuth токен от подписки Claude (из macOS Keychain)
     auth_method: str = "api_key"
+    # Именованные MCP-инстансы (instance_id → config)
+    mcp_instances: dict[str, McpInstanceConfig] = Field(default_factory=dict)
 
 
 class Settings(BaseModel):
@@ -85,14 +96,67 @@ class Settings(BaseModel):
     # Переменные окружения (не из YAML)
     telegram_bot_token: str = ""
     anthropic_api_key: str = ""
-    anthropic_auth_token: str = ""  # OAuth токен от подписки
+    anthropic_auth_token: str = ""
 
     model_config = {"populate_by_name": True}
 
 
+def _migrate_legacy_mcp(data: dict[str, Any]) -> dict[str, Any]:
+    """Конвертация старого формата (gmail/calendar поля) в mcp_instances.
+
+    Автоматически создаёт mcp_instances в global и mcp_services в projects
+    на основе legacy gmail/calendar/telegram_monitor полей.
+    """
+    global_data = data.get("global", {})
+    projects_data = data.get("projects", {})
+
+    # Если уже есть mcp_instances — миграция не нужна
+    if global_data.get("mcp_instances"):
+        return data
+
+    mcp_instances: dict[str, dict[str, Any]] = {}
+    migrated = False
+
+    for pid, proj in projects_data.items():
+        services: list[str] = []
+
+        # Gmail
+        gmail = proj.get("gmail", {})
+        if gmail.get("enabled"):
+            instance_id = f"{pid}_gmail"
+            mcp_instances[instance_id] = {
+                "type": "gmail",
+                "credentials_dir": gmail.get("credentials_dir", ""),
+            }
+            services.append(instance_id)
+            migrated = True
+
+        # Calendar
+        calendar = proj.get("calendar", {})
+        if calendar.get("enabled"):
+            instance_id = f"{pid}_calendar"
+            mcp_instances[instance_id] = {
+                "type": "calendar",
+                "account_id": calendar.get("account_id", ""),
+            }
+            services.append(instance_id)
+            migrated = True
+
+        if services:
+            proj["mcp_services"] = services
+
+    if migrated:
+        global_data["mcp_instances"] = mcp_instances
+        data["global"] = global_data
+        logger.info(
+            "Миграция legacy MCP: создано %d инстансов", len(mcp_instances),
+        )
+
+    return data
+
+
 def load_settings(config_path: Path | None = None) -> Settings:
     """Загрузить настройки из YAML-файла и переменных окружения."""
-    # Загружаем .env из корня проекта
     env_path = Path(__file__).parent.parent / ".env"
     load_dotenv(env_path)
 
@@ -103,6 +167,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
             data: dict[str, Any] = yaml.safe_load(f) or {}
     else:
         data = {}
+
+    # Миграция legacy формата
+    data = _migrate_legacy_mcp(data)
 
     settings = Settings(**data)
 
@@ -116,11 +183,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
     if db_path := os.environ.get("DB_PATH"):
         settings.global_config.db_path = db_path
 
-    # Переопределение auth_method из env (для Railway: AUTH_METHOD=api_key)
     if auth_method := os.environ.get("AUTH_METHOD"):
         settings.global_config.auth_method = auth_method
 
-    # OAuth от подписки: читаем из .env (настраивается через python3.12 -m src.auth_setup)
     if settings.global_config.auth_method == "oauth":
         settings.anthropic_auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
 
@@ -130,13 +195,27 @@ def load_settings(config_path: Path | None = None) -> Settings:
 def save_settings(settings: Settings, config_path: Path | None = None) -> None:
     """Атомарно сохранить настройки в YAML (через tmp + rename)."""
     path = config_path or CONFIG_PATH
+
+    # Сериализация mcp_instances
+    mcp_instances_data = {}
+    for iid, inst in settings.global_config.mcp_instances.items():
+        inst_dict = inst.model_dump(exclude_defaults=True)
+        # Всегда сохраняем type
+        inst_dict["type"] = inst.type.value
+        mcp_instances_data[iid] = inst_dict
+
+    global_data = settings.global_config.model_dump(exclude={"mcp_instances"})
+    if mcp_instances_data:
+        global_data["mcp_instances"] = mcp_instances_data
+
     data = {
-        "global": settings.global_config.model_dump(),
+        "global": global_data,
         "projects": {
             pid: proj.model_dump()
             for pid, proj in settings.projects.items()
         },
     }
+
     fd, tmp_path = tempfile.mkstemp(
         dir=path.parent, suffix=".yaml.tmp", prefix=".projects_",
     )
@@ -149,36 +228,68 @@ def save_settings(settings: Settings, config_path: Path | None = None) -> None:
         raise
 
 
-def default_tool_policy(gmail_enabled: bool, calendar_enabled: bool) -> ToolPolicy:
-    """Сгенерировать стандартную ToolPolicy на основе включённых сервисов."""
+def default_tool_policy(
+    enabled_types: list[McpServerType] | None = None,
+    *,
+    gmail_enabled: bool = False,
+    calendar_enabled: bool = False,
+) -> ToolPolicy:
+    """Сгенерировать стандартную ToolPolicy на основе включённых MCP-типов.
+
+    Поддерживает как новый формат (enabled_types), так и legacy (gmail/calendar).
+    """
+    # Legacy compat
+    if enabled_types is None:
+        enabled_types = []
+        if gmail_enabled:
+            enabled_types.append(McpServerType.gmail)
+        if calendar_enabled:
+            enabled_types.append(McpServerType.calendar)
+
     prefixes_ro: list[str] = []
     prefixes_drafts: list[str] = []
     approval_drafts: list[str] = []
     approval_controlled: list[str] = []
 
-    if gmail_enabled:
-        prefixes_ro.extend(["search_emails", "read_email", "list_email_labels",
-                            "list_filters", "get_filter", "download_attachment"])
-        prefixes_drafts.extend(["search_emails", "read_email", "draft_email",
-                                "list_email_labels", "create_label", "get_or_create_label",
-                                "create_filter", "list_filters", "get_filter",
-                                "download_attachment"])
-        approval_drafts.append("draft_email")
-        approval_controlled.extend(["send_email", "delete_email", "modify_email",
-                                    "batch_modify_emails", "batch_delete_emails"])
+    for stype in enabled_types:
+        meta = MCP_TYPE_META.get(stype)
+        if not meta:
+            continue
 
-    if calendar_enabled:
-        prefixes_ro.extend(["list-events", "search-events", "get-event",
-                            "list-calendars", "list-colors", "get-freebusy",
-                            "get-current-time"])
-        prefixes_drafts.extend(["list-events", "search-events", "get-event",
-                                "create-event", "list-calendars", "list-colors",
-                                "get-freebusy", "get-current-time"])
-        approval_drafts.append("create-event")
-        approval_controlled.extend(["update-event", "delete-event", "respond-to-event"])
+        prefix = TOOL_PREFIX_MAP.get(stype, "")
+
+        # Read-only: только чтение
+        for p in meta.tool_prefixes_read:
+            prefixes_ro.append(prefix + p if prefix else p)
+
+        # Drafts: чтение + запись (но запись через approval)
+        for p in meta.tool_prefixes_read:
+            prefixes_drafts.append(prefix + p if prefix else p)
+        for p in meta.tool_prefixes_write:
+            prefixed = prefix + p if prefix else p
+            prefixes_drafts.append(prefixed)
+            # Все write tools в drafts требуют подтверждения
+            if prefixed not in approval_drafts:
+                approval_drafts.append(prefixed)
+
+        # Controlled: approval только для опасных
+        for a in meta.approval_tools:
+            prefixed = prefix + a if prefix else a
+            if prefixed not in approval_controlled:
+                approval_controlled.append(prefixed)
 
     return ToolPolicy(
         read_only=ToolPolicyPhase(allowed_prefixes=prefixes_ro, requires_approval=[]),
         drafts=ToolPolicyPhase(allowed_prefixes=prefixes_drafts, requires_approval=approval_drafts),
         controlled=ToolPolicyPhase(allowed_prefixes=["*"], requires_approval=approval_controlled),
     )
+
+
+def get_instance_types(settings: Settings, instance_ids: list[str]) -> list[McpServerType]:
+    """Получить типы MCP-серверов для списка instance_ids."""
+    types = []
+    for iid in instance_ids:
+        inst = settings.global_config.mcp_instances.get(iid)
+        if inst and inst.type not in types:
+            types.append(inst.type)
+    return types
