@@ -95,6 +95,7 @@ async def cmd_help(message: Message, **kwargs) -> None:
         f"/authgmail — Авторизация Gmail для проекта\n"
         f"/authtelegram — Авторизация Telegram MCP для проекта\n"
         f"/authslack — Авторизация Slack MCP для проекта\n"
+        f"/authatlassian — Авторизация Jira/Confluence для проекта\n"
         f"/status — Статус текущего проекта\n"
         f"/clear — Очистить историю разговора\n"
         f"/costs — Расходы за последние 7 дней\n"

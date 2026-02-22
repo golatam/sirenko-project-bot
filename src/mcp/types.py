@@ -73,8 +73,9 @@ TOOL_PREFIX_MAP: dict[McpServerType, str] = {
     McpServerType.telegram: "tg_",
     McpServerType.whatsapp: "wa_",
     McpServerType.slack: "slack_",
-    McpServerType.confluence: "confluence_",
-    McpServerType.jira: "jira_",
+    # Confluence и Jira: tools уже имеют встроенный prefix (conf_*, jira_*)
+    McpServerType.confluence: "",
+    McpServerType.jira: "",
 }
 
 
@@ -183,33 +184,36 @@ MCP_TYPE_META: dict[McpServerType, McpTypeMeta] = {
             "usergroups_users_update",
         ],
     ),
+    # 5 generic HTTP tools от @aashari/mcp-server-atlassian-confluence v3.x
+    # Tools уже имеют prefix conf_ — namespace prefix пустой.
     McpServerType.confluence: McpTypeMeta(
         category="confluence",
         display_name="Confluence",
-        capability_description="Поиск и чтение страниц в Confluence",
+        capability_description="Поиск и чтение страниц в Confluence (Cloud)",
         tool_prefixes_read=[
-            "search", "get_page", "list_spaces", "get_comments",
+            "conf_get",
         ],
         tool_prefixes_write=[
-            "create_page", "update_page",
+            "conf_post", "conf_put", "conf_patch", "conf_delete",
         ],
         approval_tools=[
-            "create_page", "update_page",
+            "conf_post", "conf_put", "conf_patch", "conf_delete",
         ],
     ),
+    # 5 generic HTTP tools от @aashari/mcp-server-atlassian-jira v3.x
+    # Tools уже имеют prefix jira_ — namespace prefix пустой.
     McpServerType.jira: McpTypeMeta(
         category="jira",
         display_name="Jira",
-        capability_description="Поиск и управление задачами в Jira",
+        capability_description="Поиск и управление задачами в Jira (Cloud)",
         tool_prefixes_read=[
-            "search", "get_issue", "list_projects", "get_transitions",
+            "jira_get",
         ],
         tool_prefixes_write=[
-            "create_issue", "update_issue",
-            "add_comment", "transition_issue",
+            "jira_post", "jira_put", "jira_patch", "jira_delete",
         ],
         approval_tools=[
-            "create_issue", "update_issue", "transition_issue",
+            "jira_post", "jira_put", "jira_patch", "jira_delete",
         ],
     ),
 }

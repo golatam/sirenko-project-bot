@@ -39,3 +39,11 @@ class AuthTelegramStates(StatesGroup):
 class AuthSlackStates(StatesGroup):
     """FSM для /authslack."""
     token = State()
+
+
+class AuthAtlassianStates(StatesGroup):
+    """FSM для /authatlassian."""
+    site_name = State()
+    user_email = State()
+    api_token = State()
+    services = State()  # confluence / jira / both
