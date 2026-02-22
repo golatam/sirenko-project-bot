@@ -12,6 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from src.bot.keyboards import (
+    mcp_existing_instances_keyboard,
     mcp_instance_keyboard,
     mcp_remove_confirm_keyboard,
     mcp_type_keyboard,
@@ -102,7 +103,28 @@ async def on_addmcp_type(callback: CallbackQuery, state: FSMContext,
         await callback.message.edit_text("Проект не найден.")
         return
 
-    # Маппинг типа → команда авторизации
+    # Проверяем существующие instances этого типа из других проектов
+    reusable = _get_reusable_instances(settings, pid, type_key)
+    if reusable:
+        meta = MCP_TYPE_META.get(McpServerType(type_key))
+        display = meta.display_name if meta else type_key
+        await callback.message.edit_text(
+            f"{bold(display)} для {code(pid)}\n\n"
+            f"Найдены существующие подключения.\n"
+            f"Подключить имеющийся или создать новый?",
+            parse_mode="HTML",
+            reply_markup=mcp_existing_instances_keyboard(pid, type_key, reusable),
+        )
+        return
+
+    # Нет reusable — старый flow создания нового instance
+    await _show_create_new_instructions(callback, pid, type_key, state)
+
+
+async def _show_create_new_instructions(
+    callback: CallbackQuery, pid: str, type_key: str, state: FSMContext,
+) -> None:
+    """Показать инструкции по созданию нового MCP instance."""
     auth_commands = {
         "gmail": f"/authgmail {code(pid)}",
         "telegram": f"/authtelegram {code(pid)}",
@@ -112,7 +134,6 @@ async def on_addmcp_type(callback: CallbackQuery, state: FSMContext,
     }
 
     if type_key == "calendar":
-        # Calendar — простая настройка, запускаем inline FSM
         await state.update_data(amcp_calendar_pid=pid)
         await state.set_state(AddMcpCalendarStates.google_account)
         await callback.message.edit_text(
@@ -145,6 +166,71 @@ async def on_addmcp_type(callback: CallbackQuery, state: FSMContext,
         )
     else:
         await callback.message.edit_text("Неизвестный тип сервиса.")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("amcp_e:"))
+async def on_addmcp_reuse_existing(
+    callback: CallbackQuery, settings: Settings,
+    mcp_manager: MCPManager, **kwargs,
+) -> None:
+    """Подключить существующий MCP instance к проекту."""
+    parts = callback.data.split(":")
+    pid = parts[1]
+    iid = parts[2]
+    await callback.answer()
+
+    project = settings.projects.get(pid)
+    if not project:
+        await callback.message.edit_text("Проект не найден.")
+        return
+
+    inst = settings.global_config.mcp_instances.get(iid)
+    if not inst:
+        await callback.message.edit_text(f"Instance {code(iid)} не найден.", parse_mode="HTML")
+        return
+
+    if iid in project.mcp_services:
+        await callback.message.edit_text(
+            f"{code(iid)} уже подключён к {bold(project.display_name)}.",
+            parse_mode="HTML",
+        )
+        return
+
+    # Подключаем instance к проекту
+    project.mcp_services.append(iid)
+    enabled_types = get_instance_types(settings, project.mcp_services)
+    project.tool_policy = default_tool_policy(enabled_types)
+    save_settings(settings)
+
+    meta = MCP_TYPE_META.get(inst.type)
+    display = meta.display_name if meta else inst.type.value
+
+    await callback.message.edit_text(
+        f"{bold(display)} подключён к {bold(project.display_name)}!\n\n"
+        f"Instance: {code(iid)}\n"
+        f"MCP-сервер запускается...",
+        parse_mode="HTML",
+    )
+
+    asyncio.create_task(_start_mcp_bg(mcp_manager, pid, project))
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("amcp_n:"))
+async def on_addmcp_create_new(
+    callback: CallbackQuery, state: FSMContext, settings: Settings, **kwargs,
+) -> None:
+    """Создать новый MCP instance (старый flow)."""
+    parts = callback.data.split(":")
+    pid = parts[1]
+    type_key = parts[2]
+    await callback.answer()
+
+    project = settings.projects.get(pid)
+    if not project:
+        await callback.message.edit_text("Проект не найден.")
+        return
+
+    await _show_create_new_instructions(callback, pid, type_key, state)
 
 
 @router.callback_query(lambda c: c.data == "amcp_cancel")
@@ -322,6 +408,33 @@ async def on_removemcp_cancel(callback: CallbackQuery, state: FSMContext, **kwar
 # ---------------------------------------------------------------------------
 # Вспомогательные функции
 # ---------------------------------------------------------------------------
+
+def _instance_description(iid: str, config: McpInstanceConfig) -> str:
+    """Краткое описание instance для кнопки."""
+    detail = (
+        config.account_id
+        or config.user_email
+        or config.site_name
+        or config.token_env
+        or config.credentials_dir
+    )
+    if detail:
+        return f"{iid} ({detail})"
+    return iid
+
+
+def _get_reusable_instances(
+    settings: Settings, project_id: str, type_key: str,
+) -> list[tuple[str, str]]:
+    """Найти существующие instances данного типа, не подключённые к проекту."""
+    project = settings.projects.get(project_id)
+    connected = set(project.mcp_services) if project else set()
+    result: list[tuple[str, str]] = []
+    for iid, config in settings.global_config.mcp_instances.items():
+        if config.type.value == type_key and iid not in connected:
+            result.append((iid, _instance_description(iid, config)))
+    return result
+
 
 def _get_connected_types(settings: Settings, instance_ids: list[str]) -> set[str]:
     """Получить множество подключённых типов MCP для проекта."""

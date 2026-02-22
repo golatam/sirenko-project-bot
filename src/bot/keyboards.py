@@ -224,6 +224,30 @@ def mcp_type_keyboard(project_id: str, connected_types: set[str]) -> InlineKeybo
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def mcp_existing_instances_keyboard(
+    project_id: str,
+    type_key: str,
+    existing: list[tuple[str, str]],
+) -> InlineKeyboardMarkup:
+    """Клавиатура выбора существующего instance или создания нового.
+
+    existing: [(instance_id, description), ...]
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for iid, desc in existing:
+        rows.append([InlineKeyboardButton(
+            text=f"Подключить: {desc}",
+            callback_data=f"amcp_e:{project_id}:{iid}",
+        )])
+
+    rows.append([InlineKeyboardButton(
+        text="Создать новый",
+        callback_data=f"amcp_n:{project_id}:{type_key}",
+    )])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="amcp_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def mcp_instance_keyboard(
     instances: list[tuple[str, str, bool]],
 ) -> InlineKeyboardMarkup:
