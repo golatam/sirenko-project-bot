@@ -21,6 +21,12 @@ projects:
       enabled: false
       session_string_env: ''
       monitored_chats: []
+    reporting:
+      enabled: true
+      daily_plan_time: '09:00'
+      weekly_report_day: friday
+      weekly_report_time: '18:00'
+      timezone: Europe/Moscow
     tool_policy:
       read_only:
         allowed_prefixes:
