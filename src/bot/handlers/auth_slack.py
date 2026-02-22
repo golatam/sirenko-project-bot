@@ -87,7 +87,7 @@ async def cmd_authslack(message: Message, state: FSMContext,
     await state.set_state(AuthSlackStates.token)
     await message.answer(
         f"{bold('Авторизация Slack MCP')} для {code(pid)}\n\n"
-        f"Введи {bold('User OAuth Token')} (начинается с {code('xoxp-')})\n\n"
+        f"Введи {bold('User OAuth Token')} (начинается с {code('xoxp-')} или {code('xoxe.xoxp-')})\n\n"
         f"Как получить:\n"
         f"1. Открой https://api.slack.com/apps и создай App\n"
         f"2. Перейди в OAuth & Permissions\n"
@@ -110,9 +110,9 @@ async def on_slack_token(message: Message, state: FSMContext,
     """Ввод Slack User OAuth Token."""
     token = message.text.strip()
 
-    if not token.startswith("xoxp-"):
+    if not (token.startswith("xoxp-") or token.startswith("xoxe.xoxp-")):
         await message.answer(
-            f"Токен должен начинаться с {code('xoxp-')}.\n"
+            f"Токен должен начинаться с {code('xoxp-')} или {code('xoxe.xoxp-')}.\n"
             f"Это User OAuth Token, не Bot Token (xoxb-).",
             parse_mode="HTML",
         )
