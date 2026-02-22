@@ -43,6 +43,8 @@ BOT_COMMANDS = [
     BotCommand(command="authtelegram", description="Авторизация Telegram MCP"),
     BotCommand(command="authslack", description="Авторизация Slack MCP"),
     BotCommand(command="authatlassian", description="Авторизация Jira/Confluence"),
+    BotCommand(command="addmcp", description="Подключить MCP-сервис"),
+    BotCommand(command="removemcp", description="Отключить MCP-сервис"),
 ]
 
 
@@ -223,6 +225,11 @@ async def on_menu_action(callback: CallbackQuery, state: FSMContext,
             "Для удаления проекта отправь команду:\n/deleteproject"
         )
 
+    elif action in ("addmcp", "removemcp"):
+        await callback.message.answer(
+            f"Отправь команду:\n/{action}"
+        )
+
     elif action in ("authgmail", "authtelegram", "authslack", "authatlassian"):
         # Показываем подсказку с нужной командой
         projects = ", ".join(code(pid) for pid in settings.projects)
@@ -259,9 +266,10 @@ async def on_help_navigate(callback: CallbackQuery, **kwargs) -> None:
         "manage": (
             f"{bold('Управление проектами')}\n\n"
             f"/addproject — Создать новый проект\n"
-            f"  (пошаговый диалог: ID, имя, описание, сервисы)\n\n"
-            f"/deleteproject — Удалить проект\n"
-            f"  (выбор из списка + подтверждение)\n"
+            f"/deleteproject — Удалить проект\n\n"
+            f"{bold('MCP-сервисы')}\n\n"
+            f"/addmcp — Подключить MCP-сервис к проекту\n"
+            f"/removemcp — Отключить MCP-сервис\n"
         ),
         "auth": (
             f"{bold('Авторизация сервисов')}\n\n"

@@ -16,7 +16,7 @@ from src.agent.core import AgentCore
 from src.bootstrap_credentials import bootstrap_credentials
 from src.bot.handlers import (
     approvals, auth, auth_atlassian, auth_slack, auth_telegram,
-    commands, project_management, queries,
+    commands, mcp_management, project_management, queries,
 )
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.project_context import ProjectContextMiddleware
@@ -84,6 +84,7 @@ async def main() -> None:
     dp.include_router(auth_telegram.router)
     dp.include_router(auth_slack.router)
     dp.include_router(auth_atlassian.router)
+    dp.include_router(mcp_management.router)
     dp.include_router(approvals.router)
     dp.include_router(queries.router)  # Catch-all для свободного текста — последний
 

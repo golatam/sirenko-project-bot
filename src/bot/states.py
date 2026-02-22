@@ -47,3 +47,14 @@ class AuthAtlassianStates(StatesGroup):
     user_email = State()
     api_token = State()
     services = State()  # confluence / jira / both
+
+
+class RemoveMcpStates(StatesGroup):
+    """FSM для /removemcp."""
+    instance_select = State()
+    confirm = State()
+
+
+class AddMcpCalendarStates(StatesGroup):
+    """FSM для добавления Calendar через /addmcp."""
+    google_account = State()

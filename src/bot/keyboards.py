@@ -74,6 +74,10 @@ def help_category_keyboard(category: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Создать проект", callback_data="menu:addproject"),
                 InlineKeyboardButton(text="Удалить проект", callback_data="menu:deleteproject"),
             ],
+            [
+                InlineKeyboardButton(text="Подключить MCP", callback_data="menu:addmcp"),
+                InlineKeyboardButton(text="Отключить MCP", callback_data="menu:removemcp"),
+            ],
         ]
     elif category == "auth":
         rows = [
@@ -177,4 +181,73 @@ def model_selector() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Opus 4.6", callback_data="model:claude-opus-4-6"),
             ],
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# /addmcp — выбор типа MCP для подключения
+# ---------------------------------------------------------------------------
+
+_MCP_TYPE_LABELS: dict[str, str] = {
+    "gmail": "Gmail",
+    "calendar": "Calendar",
+    "telegram": "Telegram",
+    "slack": "Slack",
+    "confluence": "Confluence",
+    "jira": "Jira",
+    "whatsapp": "WhatsApp",
+}
+
+
+def mcp_type_keyboard(project_id: str, connected_types: set[str]) -> InlineKeyboardMarkup:
+    """Клавиатура выбора типа MCP для подключения к проекту.
+
+    Уже подключённые типы помечаются галочкой.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+
+    for type_key, label in _MCP_TYPE_LABELS.items():
+        mark = " [+]" if type_key in connected_types else ""
+        row.append(InlineKeyboardButton(
+            text=f"{label}{mark}",
+            callback_data=f"amcp_t:{project_id}:{type_key}",
+        ))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+
+    if row:
+        rows.append(row)
+
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="amcp_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def mcp_instance_keyboard(
+    instances: list[tuple[str, str, bool]],
+) -> InlineKeyboardMarkup:
+    """Клавиатура выбора MCP-инстанса для удаления.
+
+    instances: [(instance_id, type_display_name, is_running), ...]
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for iid, type_name, running in instances:
+        status = "ON" if running else "OFF"
+        rows.append([InlineKeyboardButton(
+            text=f"{type_name} [{status}] ({iid})",
+            callback_data=f"rmcp_i:{iid}",
+        )])
+
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="rmcp_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def mcp_remove_confirm_keyboard(instance_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения удаления MCP-инстанса."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="Удалить", callback_data=f"rmcp_y:{instance_id}"),
+            InlineKeyboardButton(text="Отмена", callback_data="rmcp_cancel"),
+        ]]
     )
