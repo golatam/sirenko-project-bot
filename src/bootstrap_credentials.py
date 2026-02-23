@@ -2,8 +2,8 @@
 
 Маппинг переменных окружения → файлы:
   CRED_GOOGLE_CREDENTIALS       → credentials/google/credentials.json
-  CRED_FLEXIFY_GMAIL_CREDENTIALS → credentials/flexify/gmail/credentials.json
-  CRED_FLEXIFY_GMAIL_TOKEN       → credentials/flexify/gmail/token.json
+  CRED_FLEXIFY_GMAIL_CREDENTIALS → credentials/flexifai/gmail/credentials.json
+  CRED_FLEXIFY_GMAIL_TOKEN       → credentials/flexifai/gmail/token.json
   CRED_CALENDAR_KEYS             → credentials/calendar/gcp-oauth.keys.json
   CRED_CALENDAR_TOKENS           → credentials/calendar/tokens.json
 """
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # env var → относительный путь от PROJECT_ROOT
 _CRED_MAP: dict[str, str] = {
     "CRED_GOOGLE_CREDENTIALS": "credentials/google/credentials.json",
-    "CRED_FLEXIFY_GMAIL_CREDENTIALS": "credentials/flexify/gmail/credentials.json",
-    "CRED_FLEXIFY_GMAIL_TOKEN": "credentials/flexify/gmail/token.json",
+    "CRED_FLEXIFY_GMAIL_CREDENTIALS": "credentials/flexifai/gmail/credentials.json",
+    "CRED_FLEXIFY_GMAIL_TOKEN": "credentials/flexifai/gmail/token.json",
     "CRED_CALENDAR_KEYS": "credentials/calendar/gcp-oauth.keys.json",
     "CRED_CALENDAR_TOKENS": "credentials/calendar/tokens.json",
 }
