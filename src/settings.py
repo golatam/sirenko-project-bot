@@ -227,6 +227,12 @@ def load_settings(config_path: Path | None = None) -> Settings:
     if auth_method := os.environ.get("AUTH_METHOD"):
         settings.global_config.auth_method = auth_method
 
+    if force_phase := os.environ.get("FORCE_PHASE"):
+        if force_phase in ("read_only", "drafts", "controlled"):
+            settings.global_config.phase = force_phase
+            save_settings(settings, config_path)
+            logger.info("FORCE_PHASE: фаза изменена на %s и сохранена", force_phase)
+
     if settings.global_config.auth_method == "oauth":
         settings.anthropic_auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
         settings.anthropic_refresh_token = os.environ.get("ANTHROPIC_REFRESH_TOKEN", "")
