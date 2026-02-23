@@ -41,11 +41,11 @@ python3.12 -m pytest tests/
 - `src/agent/auth.py` — авто-рефреш OAuth токена при 401 (OAuthRefresher + asyncio.Lock)
 - `src/agent/classifier.py` — Haiku-классификатор запросов (динамический по MCP-типам)
 - `src/agent/summarizer.py` — автосжатие истории
-- `src/agent/prompts.py` — сборка системных промптов + генерация промпт-файлов
+- `src/agent/prompts.py` — сборка системных промптов (динамический блок подключённых сервисов) + генерация промпт-файлов
 
 ### MCP-инфраструктура (instance-based)
 - `src/mcp/types.py` — McpServerType enum (7 типов), McpInstanceConfig, McpTypeMeta, TOOL_PREFIX_MAP
-- `src/mcp/factory.py` — фабрика StdioServerParameters по типу (npx/uv/node)
+- `src/mcp/factory.py` — фабрика StdioServerParameters по типу (npx/uv/node), диагностика credentials
 - `src/mcp/manager.py` — lifecycle менеджер с refcount (кросс-проектное sharing)
 - `src/mcp/registry.py` — реестр инструментов с namespace prefix и original name mapping
 - `src/mcp/client.py` — MCP клиент (stdio transport)
@@ -73,7 +73,7 @@ python3.12 -m pytest tests/
 ### Конфигурация и данные
 - `src/settings.py` — конфигурация из YAML + env, save_settings, default_tool_policy, миграция legacy
 - `src/auth_setup.py` — настройка OAuth авторизации через Claude CLI → `.env`
-- `src/bootstrap_credentials.py` — восстановление credentials из env vars (для контейнера)
+- `src/bootstrap_credentials.py` — восстановление credentials из base64 env vars (для контейнера)
 - `src/db/` — SQLite через aiosqlite
 - `config/projects.yaml` — конфигурация проектов + mcp_instances
 - `config/prompts/` — системные промпты проектов
@@ -83,8 +83,8 @@ python3.12 -m pytest tests/
 
 | Тип | Пакет | Транспорт | Prefix | Tools |
 |-----|-------|-----------|--------|-------|
-| Gmail | `@gongrzhe/server-gmail-autoauth-mcp` | npx | — | search_emails, read_email, send_email... |
-| Calendar | `@cocal/google-calendar-mcp` | npx | — | list-events, create-event, get-event... |
+| Gmail | `@gongrzhe/server-gmail-autoauth-mcp` | npx | — | 19 tools: search_emails, read_email, send_email... |
+| Calendar | `@cocal/google-calendar-mcp` | npx | — | 12 tools: list-events, create-event, get-event... |
 | Telegram | `chigwell/telegram-mcp` | uv (local) | `tg_` | 87 tools (MTProto User API) |
 | Slack | `slack-mcp-server` | npx | `slack_` | 14 tools (xoxp token) |
 | Confluence | `@aashari/mcp-server-atlassian-confluence` | npx | — | conf_get/post/put/patch/delete |
@@ -139,6 +139,7 @@ python3.12 -m pytest tests/
 - При исчерпании лимита — финальный вызов без tools для подведения итога
 - Prompt caching: system prompt + tools кешируются (экономия ~60-70%)
 - Classifier (Haiku) определяет нужны ли tools и какие категории (динамически из MCP_TYPE_META)
+- System prompt содержит динамический блок "Подключённые сервисы" (только реально запущенные MCP)
 
 ## Фазы проекта (tool_policy)
 
@@ -200,5 +201,5 @@ projects:
 
 - Railway: `Dockerfile` + `railway.toml`
 - Node.js 20 в контейнере для npx MCP-серверов
-- Credentials из env vars через `bootstrap_credentials.py`
+- Credentials из base64 env vars через `bootstrap_credentials.py` (CRED_* → файлы)
 - SQLite в `/app/data/` (Railway volume)
