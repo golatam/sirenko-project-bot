@@ -16,7 +16,8 @@ from aiogram.types import Message
 
 from src.bot.states import AuthGmailStates
 from src.mcp.manager import MCPManager
-from src.settings import Settings
+from src.mcp.types import McpServerType
+from src.settings import ProjectConfig, Settings
 from src.utils.formatting import bold, code
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,25 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.readonly",
 ]
+
+
+def _find_gmail_instance(settings: Settings, project: ProjectConfig) -> tuple[str, str] | None:
+    """Найти gmail instance и credentials_dir для проекта.
+
+    Проверяет сначала новый формат (mcp_services), затем legacy (gmail.enabled).
+    Возвращает (instance_id, credentials_dir) или None.
+    """
+    # Новый формат: ищем gmail instance в mcp_services
+    for iid in project.mcp_services:
+        inst = settings.global_config.mcp_instances.get(iid)
+        if inst and inst.type == McpServerType.gmail:
+            return iid, inst.credentials_dir or ""
+
+    # Legacy формат
+    if project.gmail.enabled:
+        return "", project.gmail.credentials_dir
+
+    return None
 
 
 def _read_oauth_client(creds_path: Path) -> dict | None:
@@ -100,7 +120,7 @@ async def cmd_authgmail(message: Message, state: FSMContext,
         # Показать список проектов с Gmail
         gmail_projects = [
             f"  {code(pid)}" for pid, p in settings.projects.items()
-            if p.gmail.enabled
+            if _find_gmail_instance(settings, p)
         ]
         if gmail_projects:
             projects_list = "\n".join(gmail_projects)
@@ -124,12 +144,15 @@ async def cmd_authgmail(message: Message, state: FSMContext,
         await message.answer(f"Проект {code(pid)} не найден.", parse_mode="HTML")
         return
 
-    if not project.gmail.enabled:
+    gmail_info = _find_gmail_instance(settings, project)
+    if not gmail_info:
         await message.answer(f"Gmail не включён для проекта {code(pid)}.", parse_mode="HTML")
         return
 
+    _gmail_instance_id, gmail_creds_dir = gmail_info
+
     # Ищем credentials.json
-    project_creds = Path(project.gmail.credentials_dir) / "credentials.json"
+    project_creds = Path(gmail_creds_dir) / "credentials.json"
     if project_creds.exists():
         creds_path = project_creds
     elif SHARED_CREDENTIALS.exists():
@@ -229,7 +252,13 @@ async def on_auth_url(message: Message, state: FSMContext,
         await message.answer("Проект не найден.")
         return
 
-    token_path = Path(project.gmail.credentials_dir) / "token.json"
+    gmail_info = _find_gmail_instance(settings, project)
+    if not gmail_info:
+        await state.clear()
+        await message.answer("Gmail больше не включён для этого проекта.")
+        return
+    _, creds_dir = gmail_info
+    token_path = Path(creds_dir) / "token.json"
     _save_token(token_data, client, token_path)
 
     await state.clear()
