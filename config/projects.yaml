@@ -3,7 +3,7 @@ global:
   default_model: claude-sonnet-4-6
   complex_model: claude-opus-4-6
   max_tokens: 2048
-  phase: read_only
+  phase: controlled
   db_path: data/agent.db
   auth_method: api_key
 
