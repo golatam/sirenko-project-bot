@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from mcp import StdioServerParameters
 
 from src.mcp.types import McpInstanceConfig, McpServerType
 from src.settings import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
 
 
 def create_server_params(config: McpInstanceConfig) -> StdioServerParameters:
@@ -32,6 +35,11 @@ def _gmail_params(config: McpInstanceConfig) -> StdioServerParameters:
     creds_dir = str(PROJECT_ROOT / config.credentials_dir)
     oauth_path = os.path.join(creds_dir, "credentials.json")
     token_path = os.path.join(creds_dir, "token.json")
+    logger.info(
+        "Gmail MCP: oauth=%s (exists=%s), token=%s (exists=%s)",
+        oauth_path, os.path.exists(oauth_path),
+        token_path, os.path.exists(token_path),
+    )
     return StdioServerParameters(
         command="npx",
         args=["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
