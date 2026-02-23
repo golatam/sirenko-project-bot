@@ -39,6 +39,17 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_ITERATIONS = 15
 MAX_TOKENS_BUDGET = 50_000  # Лимит по токенам на один запрос пользователя
 
+# Per-tool лимиты обрезки результатов (символов).
+# Gmail/Calendar возвращают структурированные данные — нужен больший лимит,
+# иначе список писем обрезается и агент видит только начало выдачи.
+TOOL_RESULT_LIMITS: dict[str, int] = {
+    "search_emails": 8000,
+    "read_email": 12000,
+    "list-events": 6000,
+    "search-events": 6000,
+}
+DEFAULT_TOOL_RESULT_LIMIT = 2000
+
 
 @dataclass
 class AgentResponse:
@@ -284,7 +295,7 @@ class AgentCore:
                         result_text = error_msg
 
                     # Обрезаем результат чтобы не раздувать контекст
-                    truncated = self._truncate_tool_result(result_text)
+                    truncated = self._truncate_tool_result(result_text, tool_name=tool_name)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
@@ -401,7 +412,7 @@ class AgentCore:
             )
 
         # Заменяем placeholder в последнем user-сообщении (tool_results)
-        truncated_result = self._truncate_tool_result(result_text)
+        truncated_result = self._truncate_tool_result(result_text, tool_name=approval.tool_name)
         replaced = False
         if messages and messages[-1].get("role") == "user":
             content = messages[-1].get("content", [])
@@ -463,7 +474,7 @@ class AgentCore:
                         latency = int((time.monotonic() - start) * 1000)
                         res = f"Ошибка: {e}"
                         await log_tool_call(self.db, project_id, tb.name, tb.input, res, model, latency_ms=latency, is_error=True)
-                    post_results.append({"type": "tool_result", "tool_use_id": tb.id, "content": self._truncate_tool_result(res)})
+                    post_results.append({"type": "tool_result", "tool_use_id": tb.id, "content": self._truncate_tool_result(res, tool_name=tb.name)})
                 messages.append({"role": "user", "content": post_results})
 
             text = self._extract_text(response)
@@ -626,8 +637,16 @@ class AgentCore:
         return services
 
     @staticmethod
-    def _truncate_tool_result(text: str, max_chars: int = 2000) -> str:
-        """Обрезать результат инструмента для экономии токенов."""
+    def _truncate_tool_result(text: str, max_chars: int = 0, *, tool_name: str = "") -> str:
+        """Обрезать результат инструмента для экономии токенов.
+
+        Лимит выбирается по приоритету:
+        1. Явный max_chars (если передан > 0)
+        2. Per-tool лимит из TOOL_RESULT_LIMITS
+        3. DEFAULT_TOOL_RESULT_LIMIT (2000)
+        """
+        if max_chars <= 0:
+            max_chars = TOOL_RESULT_LIMITS.get(tool_name, DEFAULT_TOOL_RESULT_LIMIT)
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n...[обрезано]"

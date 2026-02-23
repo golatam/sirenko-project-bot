@@ -50,12 +50,48 @@ def build_system_prompt(
         parts.append(f"\n## Подключённые сервисы\n")
         parts.append("К проекту не подключены MCP-сервисы.")
 
-    # 4. Правила фазы
+    # 4. Правила работы с почтой (если Gmail подключён)
+    if connected_services and any("Gmail" in s for s in connected_services):
+        parts.append(_get_email_search_rules())
+
+    # 5. Правила фазы
     phase_rules = _get_phase_rules(phase)
     parts.append(f"\n## Правила текущей фазы ({phase})\n")
     parts.append(phase_rules)
 
     return "\n".join(parts)
+
+
+def _get_email_search_rules() -> str:
+    """Правила поиска почты — query planner + валидация результатов."""
+    return (
+        "\n## Правила поиска почты (Gmail)\n"
+        "\n"
+        "### Стратегия поиска\n"
+        "При поиске контактов, партнёров или информации в почте:\n"
+        "1. **Разбивай на несколько узких запросов** вместо одного широкого. "
+        "Например, для поиска платёжных партнёров:\n"
+        '   - `search_emails(query="subject:(payment OR payout OR acquiring OR PSP)", maxResults=30)`\n'
+        '   - `search_emails(query="subject:(merchant OR processing OR gateway)", maxResults=30)`\n'
+        '   - НЕ делай: `search_emails(query="in:inbox", maxResults=10)` — слишком широко\n'
+        "2. **Используй операторы Gmail**: `from:`, `to:`, `subject:`, `has:attachment`, "
+        "`after:YYYY/MM/DD`, `before:YYYY/MM/DD`, `OR`, `-` (exclude)\n"
+        "3. **Исключай нерелевантное** через `-`: "
+        '`-subject:(invoice OR receipt)` если ищешь не счета\n'
+        "4. **Ставь maxResults=30-50** для поисковых запросов (по умолчанию только 10)\n"
+        "\n"
+        "### Валидация результатов\n"
+        "5. После поиска **проверяй релевантность**: если результат не соответствует запросу "
+        "пользователя — не включай его в ответ\n"
+        "6. Если нужны детали — используй `read_email` для проверки содержимого\n"
+        "7. В ответе **группируй по типу/теме**, а не просто перечисляй\n"
+        "\n"
+        "### Полнота выдачи\n"
+        "8. Если результатов мало — сделай дополнительный запрос с другими ключевыми словами "
+        "или расширенным временным диапазоном\n"
+        "9. Сообщи пользователю если поиск мог быть неполным: "
+        '"Найдено N писем по запросу X. Для более полного поиска уточни период или ключевые слова."\n'
+    )
 
 
 def _get_phase_rules(phase: str) -> str:
