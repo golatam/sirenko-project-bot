@@ -15,7 +15,10 @@ from pydantic import BaseModel, Field
 from src.mcp.types import MCP_TYPE_META, McpInstanceConfig, McpServerType, TOOL_PREFIX_MAP
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_PATH = PROJECT_ROOT / "config" / "projects.yaml"
+# Конфиг по умолчанию — в config/ (из git, read-only шаблон)
+_DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "projects.yaml"
+# Persistent config — на volume (data/), переживает редеплой
+CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", "")) if os.environ.get("CONFIG_PATH") else _DEFAULT_CONFIG_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -166,12 +169,33 @@ def _migrate_legacy_mcp(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _resolve_config_path(config_path: Path | None = None) -> Path:
+    """Определить путь к конфигу: persistent (volume) или default (git).
+
+    При первом запуске на сервере копирует шаблон из config/ в data/.
+    """
+    path = config_path or CONFIG_PATH
+
+    # Если путь указан явно (env var или аргумент) и файла нет —
+    # скопировать из шаблона config/projects.yaml
+    if path != _DEFAULT_CONFIG_PATH and not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if _DEFAULT_CONFIG_PATH.exists():
+            import shutil
+            shutil.copy2(_DEFAULT_CONFIG_PATH, path)
+            logger.info("Конфиг скопирован из шаблона: %s → %s", _DEFAULT_CONFIG_PATH, path)
+        else:
+            logger.warning("Шаблон конфига не найден: %s", _DEFAULT_CONFIG_PATH)
+
+    return path
+
+
 def load_settings(config_path: Path | None = None) -> Settings:
     """Загрузить настройки из YAML-файла и переменных окружения."""
     env_path = Path(__file__).parent.parent / ".env"
     load_dotenv(env_path)
 
-    path = config_path or CONFIG_PATH
+    path = _resolve_config_path(config_path)
 
     if path.exists():
         with open(path) as f:
