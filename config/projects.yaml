@@ -1,81 +1,10 @@
 global:
-  owner_telegram_id: 7664703896
+  owner_telegram_id: 0
   default_model: claude-sonnet-4-6
   complex_model: claude-opus-4-6
   max_tokens: 2048
   phase: read_only
   db_path: data/agent.db
-  auth_method: oauth
-projects:
-  flexify:
-    display_name: Flexify
-    phase: controlled
-    system_prompt_file: config/prompts/flexify.md
-    gmail:
-      enabled: true
-      credentials_dir: credentials/flexify/gmail
-    calendar:
-      enabled: true
-      account_id: kirill.s@flexify.finance
-    telegram_monitor:
-      enabled: false
-      session_string_env: ''
-      monitored_chats: []
-    reporting:
-      enabled: true
-      daily_plan_time: '09:00'
-      weekly_report_day: friday
-      weekly_report_time: '18:00'
-      timezone: Europe/Moscow
-    tool_policy:
-      read_only:
-        allowed_prefixes:
-        - search_emails
-        - read_email
-        - list_email_labels
-        - list_filters
-        - get_filter
-        - download_attachment
-        - list-events
-        - search-events
-        - get-event
-        - list-calendars
-        - list-colors
-        - get-freebusy
-        - get-current-time
-        requires_approval: []
-      drafts:
-        allowed_prefixes:
-        - search_emails
-        - read_email
-        - draft_email
-        - list_email_labels
-        - create_label
-        - get_or_create_label
-        - create_filter
-        - list_filters
-        - get_filter
-        - download_attachment
-        - list-events
-        - search-events
-        - get-event
-        - create-event
-        - list-calendars
-        - list-colors
-        - get-freebusy
-        - get-current-time
-        requires_approval:
-        - draft_email
-        - create-event
-      controlled:
-        allowed_prefixes:
-        - '*'
-        requires_approval:
-        - send_email
-        - delete_email
-        - modify_email
-        - batch_modify_emails
-        - batch_delete_emails
-        - update-event
-        - delete-event
-        - respond-to-event
+  auth_method: api_key
+
+projects: {}

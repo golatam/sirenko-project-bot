@@ -176,6 +176,11 @@ def _resolve_config_path(config_path: Path | None = None) -> Path:
     """
     path = config_path or CONFIG_PATH
 
+    # Одноразовый сброс: RESET_CONFIG=1 → удалить persistent и пересоздать из шаблона
+    if path != _DEFAULT_CONFIG_PATH and path.exists() and os.environ.get("RESET_CONFIG") == "1":
+        path.unlink()
+        logger.info("RESET_CONFIG: удалён persistent конфиг %s", path)
+
     # Если путь указан явно (env var или аргумент) и файла нет —
     # скопировать из шаблона config/projects.yaml
     if path != _DEFAULT_CONFIG_PATH and not path.exists():
