@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 from typing import Any
@@ -27,6 +28,7 @@ class MCPManager:
         self.registry = ToolRegistry()
         self._instance_refcount: dict[str, set[str]] = {}  # instance_id → {project_ids}
         self._orphaned_stacks: list[AsyncExitStack] = []
+        self._lock = asyncio.Lock()  # Защита от concurrent start/stop
 
     async def start_all(self) -> None:
         """Запустить MCP-серверы для всех проектов.
@@ -59,23 +61,24 @@ class MCPManager:
         Если instance уже запущен (используется другим проектом),
         просто увеличиваем refcount.
         """
-        for instance_id in project.mcp_services:
-            config = self.settings.global_config.mcp_instances.get(instance_id)
-            if not config:
-                logger.warning(
-                    "Проект '%s': instance '%s' не найден", project_id, instance_id,
-                )
-                continue
+        async with self._lock:
+            for instance_id in project.mcp_services:
+                config = self.settings.global_config.mcp_instances.get(instance_id)
+                if not config:
+                    logger.warning(
+                        "Проект '%s': instance '%s' не найден", project_id, instance_id,
+                    )
+                    continue
 
-            self._instance_refcount.setdefault(instance_id, set()).add(project_id)
+                self._instance_refcount.setdefault(instance_id, set()).add(project_id)
 
-            if instance_id not in self.instances:
-                await self._start_instance(instance_id, config)
-            else:
-                logger.info(
-                    "Instance '%s' уже запущен, добавляем проект '%s'",
-                    instance_id, project_id,
-                )
+                if instance_id not in self.instances:
+                    await self._start_instance(instance_id, config)
+                else:
+                    logger.info(
+                        "Instance '%s' уже запущен, добавляем проект '%s'",
+                        instance_id, project_id,
+                    )
 
     async def stop_project(self, project_id: str) -> None:
         """Остановить MCP-серверы проекта.
@@ -83,37 +86,35 @@ class MCPManager:
         Instance останавливается только если ни один другой проект
         его не использует (refcount = 0).
         """
-        # Собираем instances этого проекта
-        project = self.settings.projects.get(project_id)
-        instance_ids = project.mcp_services if project else []
+        async with self._lock:
+            project = self.settings.projects.get(project_id)
+            instance_ids = project.mcp_services if project else []
 
-        for instance_id in instance_ids:
-            refs = self._instance_refcount.get(instance_id)
-            if refs:
-                refs.discard(project_id)
-                if not refs:
-                    # Никто больше не использует — останавливаем
-                    self._instance_refcount.pop(instance_id, None)
-                    client = self.instances.pop(instance_id, None)
-                    if client:
-                        self.registry.unregister_instance(instance_id)
-                        # Не вызываем disconnect (anyio cancel scopes)
-                        client._session = None
-                        client._tools = []
-                        if client._exit_stack:
-                            self._orphaned_stacks.append(client._exit_stack)
-                            client._exit_stack = None
-                    logger.info(
-                        "Instance '%s' остановлен (проект '%s' был последним)",
-                        instance_id, project_id,
-                    )
-                else:
-                    logger.info(
-                        "Instance '%s' продолжает работу (используется: %s)",
-                        instance_id, ", ".join(refs),
-                    )
+            for instance_id in instance_ids:
+                refs = self._instance_refcount.get(instance_id)
+                if refs:
+                    refs.discard(project_id)
+                    if not refs:
+                        self._instance_refcount.pop(instance_id, None)
+                        client = self.instances.pop(instance_id, None)
+                        if client:
+                            self.registry.unregister_instance(instance_id)
+                            client._session = None
+                            client._tools = []
+                            if client._exit_stack:
+                                self._orphaned_stacks.append(client._exit_stack)
+                                client._exit_stack = None
+                        logger.info(
+                            "Instance '%s' остановлен (проект '%s' был последним)",
+                            instance_id, project_id,
+                        )
+                    else:
+                        logger.info(
+                            "Instance '%s' продолжает работу (используется: %s)",
+                            instance_id, ", ".join(refs),
+                        )
 
-        logger.info("Проект '%s': MCP-серверы отвязаны", project_id)
+            logger.info("Проект '%s': MCP-серверы отвязаны", project_id)
 
     async def stop_all(self) -> None:
         """Остановить все MCP-серверы."""
@@ -171,14 +172,29 @@ class MCPManager:
             return []
         return project.get_active_policy().requires_approval
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
+    async def call_tool(
+        self, tool_name: str, arguments: dict[str, Any],
+        project_id: str | None = None,
+    ) -> str:
         """Вызвать инструмент через соответствующий MCP-клиент.
 
         Учитывает namespace prefix: tool_name может содержать prefix
         (например tg_send_message), но MCP-сервер ожидает оригинальное
         имя (send_message).
+
+        project_id — для корректной маршрутизации при одинаковых tool names
+        (например, два Gmail-инстанса для разных проектов).
         """
-        client = self.registry.get_client_for_tool(tool_name)
+        # Приоритетный lookup по инстансам проекта
+        client = None
+        if project_id:
+            project = self.settings.projects.get(project_id)
+            if project:
+                client = self.registry.get_client_for_tool_in_instances(
+                    tool_name, project.mcp_services,
+                )
+        if not client:
+            client = self.registry.get_client_for_tool(tool_name)
         if not client:
             raise ValueError(f"Инструмент '{tool_name}' не найден в реестре")
 

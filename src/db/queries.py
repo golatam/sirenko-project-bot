@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from src.db.database import Database
 from src.db.models import ApprovalRequest, Conversation, CostRecord, ToolCall
@@ -28,7 +28,7 @@ async def get_conversation_history(db: Database, project_id: str,
     """Получить последние N сообщений проекта."""
     rows = await db.fetchall(
         "SELECT * FROM conversations WHERE project_id = ? "
-        "ORDER BY created_at DESC LIMIT ?",
+        "ORDER BY id DESC LIMIT ?",
         (project_id, limit),
     )
     return [
@@ -84,7 +84,7 @@ MODEL_PRICING = {
 async def track_cost(db: Database, project_id: str, model: str,
                      tokens_input: int, tokens_output: int) -> None:
     """Обновить агрегированные расходы за день."""
-    today = date.today().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     input_price, output_price = MODEL_PRICING.get(model, (3.00, 15.00))
     cost = (tokens_input * input_price + tokens_output * output_price) / 1_000_000
 
@@ -137,13 +137,19 @@ async def create_approval(db: Database, project_id: str, tool_name: str,
     return cursor.lastrowid
 
 
-async def resolve_approval(db: Database, approval_id: int, status: str) -> None:
-    """Обновить статус запроса на подтверждение."""
-    await db.execute(
-        "UPDATE approval_requests SET status = ?, resolved_at = ? WHERE id = ?",
+async def resolve_approval(db: Database, approval_id: int, status: str) -> bool:
+    """Атомарно обновить статус запроса на подтверждение.
+
+    Возвращает True если обновление прошло (запрос был pending).
+    Возвращает False если запрос уже обработан (race condition).
+    """
+    cursor = await db.execute(
+        "UPDATE approval_requests SET status = ?, resolved_at = ? "
+        "WHERE id = ? AND status = 'pending'",
         (status, datetime.now().isoformat(), approval_id),
     )
     await db.commit()
+    return cursor.rowcount > 0
 
 
 async def get_pending_approval(db: Database, approval_id: int) -> ApprovalRequest | None:

@@ -268,7 +268,7 @@ class AgentCore:
                     tool_calls_count += 1
                     start = time.monotonic()
                     try:
-                        result_text = await self.mcp.call_tool(tool_name, tool_input)
+                        result_text = await self.mcp.call_tool(tool_name, tool_input, project_id=project_id)
                         latency = int((time.monotonic() - start) * 1000)
                         await log_tool_call(
                             self.db, project_id, tool_name, tool_input,
@@ -385,7 +385,7 @@ class AgentCore:
         tool_ok = False
         start = time.monotonic()
         try:
-            result_text = await self.mcp.call_tool(approval.tool_name, approval.tool_input)
+            result_text = await self.mcp.call_tool(approval.tool_name, approval.tool_input, project_id=project_id)
             latency = int((time.monotonic() - start) * 1000)
             tool_ok = True
             await log_tool_call(
@@ -422,7 +422,7 @@ class AgentCore:
                 }],
             })
 
-        # Фаза 2: получаем ответ Claude (если упадёт — не скрываем что tool выполнен)
+        # Фаза 2: получаем ответ Claude и продолжаем tool loop если нужно
         try:
             project = self.settings.projects[project_id]
             connected = self._get_connected_services(project_id)
@@ -430,37 +430,61 @@ class AgentCore:
             project_tools = self.mcp.get_project_tools(project_id)
             anthropic_tools = mcp_tools_to_anthropic(project_tools)
 
-            response = await self._call_claude(
-                model=model,
-                system=system_prompt,
-                messages=messages,
-                tools=anthropic_tools if anthropic_tools else None,
-            )
+            total_input = 0
+            total_output = 0
+            tool_calls_count = 1  # Уже выполнили один tool
+            max_post_approval_iterations = 5
+
+            for _iter in range(max_post_approval_iterations):
+                response = await self._call_claude(
+                    model=model,
+                    system=system_prompt,
+                    messages=messages,
+                    tools=anthropic_tools if anthropic_tools else None,
+                )
+                total_input += response.usage.input_tokens
+                total_output += response.usage.output_tokens
+
+                if response.stop_reason != "tool_use":
+                    break
+
+                # Claude хочет вызвать ещё tools — продолжаем цикл
+                tool_blocks = [b for b in response.content if b.type == "tool_use"]
+                messages.append({"role": "assistant", "content": self._serialize_content(response.content)})
+                post_results = []
+                for tb in tool_blocks:
+                    tool_calls_count += 1
+                    start = time.monotonic()
+                    try:
+                        res = await self.mcp.call_tool(tb.name, tb.input, project_id=project_id)
+                        latency = int((time.monotonic() - start) * 1000)
+                        await log_tool_call(self.db, project_id, tb.name, tb.input, res, model, latency_ms=latency)
+                    except Exception as e:
+                        latency = int((time.monotonic() - start) * 1000)
+                        res = f"Ошибка: {e}"
+                        await log_tool_call(self.db, project_id, tb.name, tb.input, res, model, latency_ms=latency, is_error=True)
+                    post_results.append({"type": "tool_result", "tool_use_id": tb.id, "content": self._truncate_tool_result(res)})
+                messages.append({"role": "user", "content": post_results})
 
             text = self._extract_text(response)
 
             await save_message(
                 self.db, project_id, "assistant", json.dumps(text),
-                tokens_input=response.usage.input_tokens,
-                tokens_output=response.usage.output_tokens,
+                tokens_input=total_input, tokens_output=total_output,
             )
-            await track_cost(
-                self.db, project_id, model,
-                response.usage.input_tokens, response.usage.output_tokens,
-            )
+            await track_cost(self.db, project_id, model, total_input, total_output)
 
             return AgentResponse(
                 text=text,
-                tool_calls_count=1,
-                tokens_input=response.usage.input_tokens,
-                tokens_output=response.usage.output_tokens,
+                tool_calls_count=tool_calls_count,
+                tokens_input=total_input,
+                tokens_output=total_output,
                 model=model,
             )
         except Exception as e:
             # Claude API упал, но инструмент мог уже выполниться
             logger.exception("Claude API ошибка после выполнения %s", approval.tool_name)
             if tool_ok:
-                # Инструмент выполнен, возвращаем результат вместо ошибки
                 fallback = f"Действие {approval.tool_name} выполнено.\n\nРезультат: {self._truncate_tool_result(result_text, 500)}"
                 return AgentResponse(text=fallback, tool_calls_count=1, model=model)
             raise

@@ -115,6 +115,30 @@ class ToolRegistry:
         """Найти MCP-клиент для данного инструмента."""
         return self._tool_to_client.get(tool_name)
 
+    def get_client_for_tool_in_instances(
+        self, tool_name: str, instance_ids: list[str],
+    ) -> MCPClient | None:
+        """Найти MCP-клиент для инструмента в конкретных инстансах проекта.
+
+        Приоритет: клиент из указанных инстансов, иначе fallback на глобальный.
+        Решает проблему коллизий при одинаковых tool names без prefix.
+        """
+        for iid in instance_ids:
+            entry = self._instances.get(iid)
+            if not entry:
+                continue
+            client, prefix, original_names = entry
+            prefixed_name = tool_name
+            # Проверяем: этот инструмент принадлежит данному инстансу?
+            if prefix and prefixed_name.startswith(prefix):
+                orig = prefixed_name[len(prefix):]
+                if orig in original_names:
+                    return client
+            elif not prefix and prefixed_name in original_names:
+                return client
+        # Fallback на глобальный lookup
+        return self._tool_to_client.get(tool_name)
+
     def get_original_tool_name(self, prefixed_name: str) -> str:
         """Получить оригинальное имя инструмента (без namespace prefix).
 

@@ -158,6 +158,28 @@ python3.12 -m pytest tests/
 - **Фаза 2**: Claude API call — если упал но tool выполнен, возвращает fallback "Действие выполнено" вместо ошибки
 - `_safe_edit` в approvals.py: 3 уровня fallback для Telegram (HTML edit → plain edit → answer)
 
+## Безопасность и robustness
+
+### MCP-процессы
+- **Изоляция env vars**: MCP child-процессы получают только whitelist переменных (`_safe_base_env()` в factory.py), секреты (API ключи, токены) не утекают
+- **Project-scoped tool resolution**: при одинаковых именах tools (Gmail/Calendar без prefix) registry выбирает правильный client по `mcp_services` проекта
+- **asyncio.Lock в MCPManager**: `start_project`/`stop_project` защищены от concurrent access
+
+### Approval flow
+- **Атомарный claim**: `UPDATE ... WHERE status='pending'` + rowcount — race condition невозможен при двойном нажатии
+- **Post-approval tool loop**: после одобрения агент продолжает полный цикл tool_use (до 5 итераций), а не один вызов
+
+### Данные и конфигурация
+- **Atomic writes**: `save_settings()` через `tempfile.mkstemp` + `os.replace` + `threading.Lock`; `.env` в auth-хендлерах тоже атомарно
+- **SQLite**: `PRAGMA busy_timeout=5000` для предотвращения `SQLITE_BUSY`; cost tracking в UTC (`datetime.now(timezone.utc)`)
+- **Auto tool_policy**: при `mcp_services` без policy — автогенерация из MCP_TYPE_META в `load_settings()`
+
+### Telegram-бот
+- **message.text None guard**: все FSM-хендлеры проверяют `if not message.text` (стикеры, фото не ломают бот)
+- **OAuth CSRF**: `state` параметр в Gmail OAuth flow + проверка при callback
+- **Idempotent shutdown**: `_shutdown_done` flag предотвращает двойной вызов (signal handler + finally)
+- **Project auto-select**: middleware выбирает проект только при `len(projects) == 1`
+
 ## Фазы проекта (tool_policy)
 
 - `read_only` — только чтение (search, read, list)

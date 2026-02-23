@@ -103,7 +103,13 @@ async def main() -> None:
     })
 
     # --- Graceful Shutdown ---
+    _shutdown_done = False
+
     async def shutdown() -> None:
+        nonlocal _shutdown_done
+        if _shutdown_done:
+            return
+        _shutdown_done = True
         logger.info("Остановка...")
         await scheduler.stop()
         await mcp_manager.stop_all()

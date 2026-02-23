@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import shutil
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -60,7 +61,7 @@ def _read_oauth_client(creds_path: Path) -> dict | None:
     return data.get("installed") or data.get("web")
 
 
-def _build_auth_url(client: dict, scopes: list[str]) -> str:
+def _build_auth_url(client: dict, scopes: list[str], state: str) -> str:
     """Сформировать URL для OAuth consent screen."""
     params = {
         "client_id": client["client_id"],
@@ -69,6 +70,7 @@ def _build_auth_url(client: dict, scopes: list[str]) -> str:
         "response_type": "code",
         "access_type": "offline",
         "prompt": "consent",
+        "state": state,
     }
     return f"{client['auth_uri']}?{urlencode(params)}"
 
@@ -176,10 +178,12 @@ async def cmd_authgmail(message: Message, state: FSMContext,
         await message.answer("Не удалось прочитать OAuth-конфигурацию из credentials.json.")
         return
 
-    # Генерируем URL
-    auth_url = _build_auth_url(client, GMAIL_SCOPES)
+    # Генерируем URL с CSRF-защитой
+    oauth_state = secrets.token_urlsafe(32)
+    auth_url = _build_auth_url(client, GMAIL_SCOPES, state=oauth_state)
 
-    await state.update_data(auth_project_id=pid, auth_creds_path=str(creds_path))
+    await state.update_data(auth_project_id=pid, auth_creds_path=str(creds_path),
+                            oauth_state=oauth_state)
     await state.set_state(AuthGmailStates.waiting_url)
 
     await message.answer(
@@ -200,16 +204,23 @@ async def on_auth_url(message: Message, state: FSMContext,
                       settings: Settings, mcp_manager: MCPManager,
                       **kwargs) -> None:
     """Получение redirect URL с кодом авторизации."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение с URL.")
+        return
     text = message.text.strip()
 
     # Извлекаем code из URL или принимаем как голый код
     auth_code = None
+    received_state = None
     if text.startswith("http"):
         parsed = urlparse(text)
         params = parse_qs(parsed.query)
         codes = params.get("code", [])
+        states = params.get("state", [])
         if codes:
             auth_code = codes[0]
+        if states:
+            received_state = states[0]
     else:
         # Может быть голый code
         if len(text) > 10 and "/" not in text:
@@ -227,6 +238,13 @@ async def on_auth_url(message: Message, state: FSMContext,
     data = await state.get_data()
     pid = data["auth_project_id"]
     creds_path = Path(data["auth_creds_path"])
+    expected_state = data.get("oauth_state")
+
+    # Проверяем state (CSRF-защита) — только для URL с state
+    if expected_state and received_state and received_state != expected_state:
+        await message.answer("Несовпадение state-параметра. Попробуй /authgmail ещё раз.")
+        await state.clear()
+        return
 
     client = _read_oauth_client(creds_path)
     if not client:

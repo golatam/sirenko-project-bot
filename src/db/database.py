@@ -26,6 +26,7 @@ class Database:
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
+        await self._db.execute("PRAGMA busy_timeout=5000")
         await self._run_migrations()
         logger.info("БД подключена: %s", self.db_path)
 

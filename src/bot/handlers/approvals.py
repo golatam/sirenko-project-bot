@@ -45,14 +45,34 @@ async def on_approve(callback: CallbackQuery, db: Database = None,
                      agent: AgentCore = None, **kwargs) -> None:
     """Пользователь подтвердил действие."""
     approval_id = int(callback.data.split(":", 1)[1])
-    approval_req = await get_pending_approval(db, approval_id)
 
-    if not approval_req:
-        await callback.answer("Запрос не найден или уже обработан", show_alert=True)
+    # Атомарный переход pending → approved (защита от двойного нажатия)
+    claimed = await resolve_approval(db, approval_id, "approved")
+    if not claimed:
+        await callback.answer("Запрос уже обработан", show_alert=True)
         return
 
+    approval_req = await get_pending_approval(db, approval_id)
+    if not approval_req:
+        # resolve_approval вернул True, но get вернул None — значит статус уже 'approved'
+        # Это нормально: get_pending_approval ищет status='pending', а мы только что сменили
+        # Достаём запрос без фильтра по статусу
+        row = await db.fetchone(
+            "SELECT * FROM approval_requests WHERE id = ?", (approval_id,),
+        )
+        if not row:
+            await callback.answer("Запрос не найден", show_alert=True)
+            return
+        from src.db.models import ApprovalRequest
+        approval_req = ApprovalRequest(
+            id=row["id"], project_id=row["project_id"],
+            tool_name=row["tool_name"], tool_input=row["tool_input"],
+            status=row["status"], telegram_message_id=row["telegram_message_id"],
+            conversation_context=row["conversation_context"],
+            created_at=row["created_at"], resolved_at=row["resolved_at"],
+        )
+
     await callback.answer("Выполняю...")
-    await resolve_approval(db, approval_id, "approved")
 
     # Восстанавливаем контекст и выполняем инструмент
     messages_snapshot = json.loads(approval_req.conversation_context) if approval_req.conversation_context else []
@@ -125,15 +145,20 @@ async def on_approve(callback: CallbackQuery, db: Database = None,
 async def on_reject(callback: CallbackQuery, db: Database = None, **kwargs) -> None:
     """Пользователь отклонил действие."""
     approval_id = int(callback.data.split(":", 1)[1])
-    approval_req = await get_pending_approval(db, approval_id)
 
-    if not approval_req:
-        await callback.answer("Запрос не найден или уже обработан", show_alert=True)
+    # Атомарный переход pending → rejected
+    claimed = await resolve_approval(db, approval_id, "rejected")
+    if not claimed:
+        await callback.answer("Запрос уже обработан", show_alert=True)
         return
 
-    await resolve_approval(db, approval_id, "rejected")
+    # Достаём данные для отображения (статус уже 'rejected')
+    row = await db.fetchone(
+        "SELECT * FROM approval_requests WHERE id = ?", (approval_id,),
+    )
+    tool_name = row["tool_name"] if row else "инструмент"
     await callback.answer("Отклонено")
     await callback.message.edit_text(
-        f"Действие {bold(approval_req.tool_name)} отклонено.",
+        f"Действие {bold(tool_name)} отклонено.",
         parse_mode="HTML",
     )

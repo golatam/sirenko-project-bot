@@ -406,6 +406,9 @@ async def on_removemcp_confirm(callback: CallbackQuery, state: FSMContext,
         await callback.message.edit_text("Проект не найден.")
         return
 
+    # Сначала останавливаем MCP (до удаления из списка, чтобы stop_project видел instance)
+    await mcp_manager.stop_project(pid)
+
     # Удаляем из mcp_services проекта
     if iid in project.mcp_services:
         project.mcp_services.remove(iid)
@@ -424,9 +427,6 @@ async def on_removemcp_confirm(callback: CallbackQuery, state: FSMContext,
     enabled_types = get_instance_types(settings, project.mcp_services)
     project.tool_policy = default_tool_policy(enabled_types)
     save_settings(settings)
-
-    # Останавливаем MCP
-    await mcp_manager.stop_project(pid)
     # Перезапускаем оставшиеся
     if project.mcp_services:
         asyncio.create_task(_start_mcp_bg(mcp_manager, pid, project))

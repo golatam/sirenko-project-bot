@@ -23,8 +23,9 @@ class ProjectContextMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        # Проект по умолчанию — первый в текущем конфиге (динамически)
-        default_project = next(iter(self.settings.projects), None)
+        # Авто-выбор только если один проект; при нескольких — требуем явный /project
+        projects = self.settings.projects
+        default_project = next(iter(projects), None) if len(projects) == 1 else None
 
         # Пытаемся достать active_project из FSM state
         fsm_context: FSMContext | None = data.get("state")
@@ -33,10 +34,9 @@ class ProjectContextMiddleware(BaseMiddleware):
         if fsm_context:
             state_data = await fsm_context.get_data()
             saved_id = state_data.get("active_project")
-            if saved_id and saved_id in self.settings.projects:
+            if saved_id and saved_id in projects:
                 project_id = saved_id
             else:
-                # Fallback: сохранённый проект удалён
                 project_id = default_project
 
         data["project_id"] = project_id

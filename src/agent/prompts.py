@@ -23,11 +23,14 @@ def build_system_prompt(
     parts: list[str] = []
 
     # 1. Базовый промпт из файла (поддержка относительных путей через PROJECT_ROOT)
-    prompt_path = Path(project.system_prompt_file)
-    if not prompt_path.is_absolute():
-        prompt_path = PROJECT_ROOT / prompt_path
-    if prompt_path.exists():
-        parts.append(prompt_path.read_text().strip())
+    if project.system_prompt_file:
+        prompt_path = Path(project.system_prompt_file)
+        if not prompt_path.is_absolute():
+            prompt_path = PROJECT_ROOT / prompt_path
+        if prompt_path.is_file():
+            parts.append(prompt_path.read_text().strip())
+        else:
+            parts.append(f"Ты — AI-ассистент для проекта '{project.display_name}'.")
     else:
         parts.append(f"Ты — AI-ассистент для проекта '{project.display_name}'.")
 

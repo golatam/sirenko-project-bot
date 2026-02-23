@@ -19,6 +19,7 @@ import asyncio
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 
 from aiogram import Router
@@ -45,7 +46,7 @@ ENV_PATH = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 def _update_env_var(key: str, value: str) -> None:
-    """Добавить или обновить переменную в .env файле."""
+    """Добавить или обновить переменную в .env файле (атомарно)."""
     env_path = ENV_PATH
     lines: list[str] = []
     found = False
@@ -61,7 +62,16 @@ def _update_env_var(key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
 
-    env_path.write_text("\n".join(lines) + "\n")
+    content = "\n".join(lines) + "\n"
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=env_path.parent, suffix=".tmp", prefix=".env_")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, env_path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
     # Обновляем текущий процесс
     os.environ[key] = value
 
@@ -114,6 +124,9 @@ async def cmd_authtelegram(message: Message, state: FSMContext,
 @router.message(AuthTelegramStates.api_id)
 async def on_api_id(message: Message, state: FSMContext, **kwargs) -> None:
     """Ввод Telegram API ID."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     text = message.text.strip()
 
     if not text.isdigit():
@@ -133,6 +146,9 @@ async def on_api_id(message: Message, state: FSMContext, **kwargs) -> None:
 @router.message(AuthTelegramStates.api_hash)
 async def on_api_hash(message: Message, state: FSMContext, **kwargs) -> None:
     """Ввод Telegram API Hash."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     text = message.text.strip()
 
     if not re.match(r"^[a-f0-9]{32}$", text):
@@ -174,6 +190,9 @@ async def on_session_string(message: Message, state: FSMContext,
                             settings: Settings, mcp_manager: MCPManager,
                             **kwargs) -> None:
     """Ввод Telegram Session String и сохранение."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     session_str = message.text.strip()
 
     # Telethon StringSession: длинная base64-подобная строка (300+ символов)

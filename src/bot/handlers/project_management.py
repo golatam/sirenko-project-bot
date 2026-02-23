@@ -69,6 +69,9 @@ async def cmd_deleteproject(message: Message, state: FSMContext,
 async def on_project_id(message: Message, state: FSMContext,
                         settings: Settings, **kwargs) -> None:
     """Ввод ID проекта."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     pid = message.text.strip().lower()
 
     if not PROJECT_ID_RE.match(pid):
@@ -89,6 +92,9 @@ async def on_project_id(message: Message, state: FSMContext,
 @router.message(AddProjectStates.display_name)
 async def on_display_name(message: Message, state: FSMContext, **kwargs) -> None:
     """Ввод отображаемого имени."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     name = message.text.strip()
     if not name:
         await message.answer("Имя не может быть пустым.")
@@ -102,6 +108,9 @@ async def on_display_name(message: Message, state: FSMContext, **kwargs) -> None
 @router.message(AddProjectStates.description)
 async def on_description(message: Message, state: FSMContext, **kwargs) -> None:
     """Ввод описания проекта."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     desc = message.text.strip()
     if not desc:
         await message.answer("Описание не может быть пустым.")

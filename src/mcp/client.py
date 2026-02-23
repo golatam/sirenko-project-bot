@@ -89,14 +89,22 @@ class MCPClient:
         """Получить кешированный список инструментов."""
         return self._tools
 
-    async def call_tool(self, tool_name: str, arguments: dict[str, Any]) -> str:
-        """Вызвать инструмент MCP-сервера."""
+    async def call_tool(self, tool_name: str, arguments: dict[str, Any],
+                        timeout: float = 60.0) -> str:
+        """Вызвать инструмент MCP-сервера с таймаутом."""
         if not self._session:
             raise RuntimeError(f"MCP '{self.name}' не подключён")
 
         logger.debug("MCP '%s': вызов %s(%s)", self.name, tool_name, arguments)
         try:
-            result = await self._session.call_tool(tool_name, arguments)
+            result = await asyncio.wait_for(
+                self._session.call_tool(tool_name, arguments),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error("Таймаут вызова %s на MCP '%s' (%ds)", tool_name, self.name, timeout)
+            self._session = None  # Помечаем как disconnected
+            raise RuntimeError(f"Таймаут вызова {tool_name} на MCP '{self.name}'")
         except Exception:
             logger.exception("Ошибка вызова %s на MCP '%s'", tool_name, self.name)
             raise

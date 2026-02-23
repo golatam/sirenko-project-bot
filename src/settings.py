@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,9 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from src.mcp.types import MCP_TYPE_META, McpInstanceConfig, McpServerType, TOOL_PREFIX_MAP
+
+# Lock для сериализации записи конфига (предотвращает lost updates)
+_settings_lock = threading.Lock()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Конфиг по умолчанию — в config/ (из git, read-only шаблон)
@@ -214,6 +218,14 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     settings = Settings(**data)
 
+    # Автогенерация tool_policy для проектов с mcp_services но без policy
+    for pid, proj in settings.projects.items():
+        if proj.mcp_services and not proj.get_active_policy().allowed_prefixes:
+            enabled = get_instance_types(settings, proj.mcp_services)
+            if enabled:
+                proj.tool_policy = default_tool_policy(enabled)
+                logger.info("Автогенерация tool_policy для '%s' (%d MCP-типов)", pid, len(enabled))
+
     # Переопределения из переменных окружения
     settings.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     settings.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -249,7 +261,16 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
 
 def save_settings(settings: Settings, config_path: Path | None = None) -> None:
-    """Атомарно сохранить настройки в YAML (через tmp + rename)."""
+    """Атомарно сохранить настройки в YAML (через tmp + rename).
+
+    Использует threading lock для защиты от concurrent записи.
+    """
+    with _settings_lock:
+        _save_settings_impl(settings, config_path)
+
+
+def _save_settings_impl(settings: Settings, config_path: Path | None = None) -> None:
+    """Внутренняя реализация save_settings (под lock)."""
     path = config_path or CONFIG_PATH
 
     # Сериализация mcp_instances

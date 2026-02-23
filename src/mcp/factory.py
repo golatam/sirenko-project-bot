@@ -12,6 +12,20 @@ from src.settings import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
+# Безопасные системные переменные для дочерних MCP-процессов
+_SAFE_ENV_KEYS = {
+    "PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "LC_CTYPE",
+    "TMPDIR", "TEMP", "TMP", "NODE_PATH", "NODE_OPTIONS",
+    "npm_config_cache", "NPM_CONFIG_PREFIX", "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME", "XDG_CACHE_HOME", "VIRTUAL_ENV",
+    "UV_CACHE_DIR", "UV_PYTHON",
+}
+
+
+def _safe_base_env() -> dict[str, str]:
+    """Базовый env для MCP-процессов — только безопасные системные переменные."""
+    return {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
+
 
 def create_server_params(config: McpInstanceConfig) -> StdioServerParameters:
     """Создать параметры запуска MCP-сервера по типу инстанса."""
@@ -44,7 +58,7 @@ def _gmail_params(config: McpInstanceConfig) -> StdioServerParameters:
         command="npx",
         args=["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
         env={
-            **os.environ,
+            **_safe_base_env(),
             "GMAIL_OAUTH_PATH": oauth_path,
             "GMAIL_CREDENTIALS_PATH": token_path,
         },
@@ -57,7 +71,7 @@ def _calendar_params(config: McpInstanceConfig) -> StdioServerParameters:
         command="npx",
         args=["-y", "@cocal/google-calendar-mcp"],
         env={
-            **os.environ,
+            **_safe_base_env(),
             "CALENDAR_ACCOUNT": config.account_id,
         },
     )
@@ -70,7 +84,7 @@ def _telegram_params(config: McpInstanceConfig) -> StdioServerParameters:
     Запуск: uv --directory <server_dir> run main.py
     Env: TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING
     """
-    env = {**os.environ}
+    env = _safe_base_env()
     if config.api_id_env:
         env["TELEGRAM_API_ID"] = os.environ.get(config.api_id_env, "")
     if config.api_hash_env:
@@ -108,7 +122,7 @@ def _whatsapp_params(config: McpInstanceConfig) -> StdioServerParameters:
     return StdioServerParameters(
         command="node",
         args=[os.path.join(server_dir, "src", "main.ts")],
-        env={**os.environ},
+        env=_safe_base_env(),
     )
 
 
@@ -118,7 +132,7 @@ def _slack_params(config: McpInstanceConfig) -> StdioServerParameters:
     Env: SLACK_MCP_XOXP_TOKEN (User OAuth Token, xoxp-*)
     Опционально: SLACK_MCP_ADD_MESSAGE_TOOL=true для write tools.
     """
-    env = {**os.environ}
+    env = _safe_base_env()
     if config.token_env:
         env["SLACK_MCP_XOXP_TOKEN"] = os.environ.get(config.token_env, "")
     # Включаем write tools (отправка сообщений, реакции)
@@ -132,7 +146,7 @@ def _slack_params(config: McpInstanceConfig) -> StdioServerParameters:
 
 def _confluence_params(config: McpInstanceConfig) -> StdioServerParameters:
     """Confluence MCP: @aashari/mcp-server-atlassian-confluence."""
-    env = {**os.environ}
+    env = _safe_base_env()
     if config.site_name:
         env["ATLASSIAN_SITE_NAME"] = config.site_name
     if config.user_email:
@@ -148,7 +162,7 @@ def _confluence_params(config: McpInstanceConfig) -> StdioServerParameters:
 
 def _jira_params(config: McpInstanceConfig) -> StdioServerParameters:
     """Jira MCP: @aashari/mcp-server-atlassian-jira."""
-    env = {**os.environ}
+    env = _safe_base_env()
     if config.site_name:
         env["ATLASSIAN_SITE_NAME"] = config.site_name
     if config.user_email:

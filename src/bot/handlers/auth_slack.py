@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from aiogram import Router
@@ -41,7 +42,7 @@ ENV_PATH = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 
 def _update_env_var(key: str, value: str) -> None:
-    """Добавить или обновить переменную в .env файле."""
+    """Добавить или обновить переменную в .env файле (атомарно)."""
     lines: list[str] = []
     found = False
 
@@ -56,7 +57,16 @@ def _update_env_var(key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
 
-    ENV_PATH.write_text("\n".join(lines) + "\n")
+    content = "\n".join(lines) + "\n"
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=ENV_PATH.parent, suffix=".tmp", prefix=".env_")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        os.replace(tmp_path, ENV_PATH)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
     os.environ[key] = value
 
 
@@ -108,6 +118,9 @@ async def on_slack_token(message: Message, state: FSMContext,
                          settings: Settings, mcp_manager: MCPManager,
                          **kwargs) -> None:
     """Ввод Slack User OAuth Token."""
+    if not message.text:
+        await message.answer("Отправь текстовое сообщение.")
+        return
     token = message.text.strip()
 
     if not (token.startswith("xoxp-") or token.startswith("xoxe.xoxp-")):

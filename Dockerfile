@@ -13,13 +13,13 @@ ENV PATH="/root/.local/bin:$PATH"
 
 WORKDIR /app
 
-# Зависимости Python
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
-
 # Код и конфиг (credentials НЕ копируем — они из env vars)
+COPY pyproject.toml .
 COPY src/ src/
 COPY config/ config/
+
+# Зависимости Python (после копирования src/ — нужен для pip install .)
+RUN pip install --no-cache-dir .
 
 # Директория для SQLite (монтируется как volume на Railway)
 RUN mkdir -p data
