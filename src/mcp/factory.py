@@ -66,14 +66,29 @@ def _gmail_params(config: McpInstanceConfig) -> StdioServerParameters:
 
 
 def _calendar_params(config: McpInstanceConfig) -> StdioServerParameters:
-    """Calendar MCP: @cocal/google-calendar-mcp."""
+    """Calendar MCP: @cocal/google-calendar-mcp.
+
+    Требует GOOGLE_OAUTH_CREDENTIALS — путь к Google Cloud OAuth credentials.json.
+    Токены сохраняются в GOOGLE_CALENDAR_MCP_TOKEN_PATH (отдельно от Gmail).
+    """
+    env = _safe_base_env()
+    if config.credentials_dir:
+        creds_dir = str(PROJECT_ROOT / config.credentials_dir)
+        oauth_path = os.path.join(creds_dir, "credentials.json")
+        token_path = os.path.join(creds_dir, "calendar_tokens.json")
+        logger.info(
+            "Calendar MCP: oauth=%s (exists=%s), token=%s (exists=%s)",
+            oauth_path, os.path.exists(oauth_path),
+            token_path, os.path.exists(token_path),
+        )
+        env["GOOGLE_OAUTH_CREDENTIALS"] = oauth_path
+        env["GOOGLE_CALENDAR_MCP_TOKEN_PATH"] = token_path
+    if config.account_id:
+        env["CALENDAR_ACCOUNT"] = config.account_id
     return StdioServerParameters(
         command="npx",
         args=["-y", "@cocal/google-calendar-mcp"],
-        env={
-            **_safe_base_env(),
-            "CALENDAR_ACCOUNT": config.account_id,
-        },
+        env=env,
     )
 
 
