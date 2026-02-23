@@ -118,11 +118,12 @@ async def on_addmcp_type(callback: CallbackQuery, state: FSMContext,
         return
 
     # Нет reusable — старый flow создания нового instance
-    await _show_create_new_instructions(callback, pid, type_key, state)
+    await _show_create_new_instructions(callback, pid, type_key, state, settings)
 
 
 async def _show_create_new_instructions(
     callback: CallbackQuery, pid: str, type_key: str, state: FSMContext,
+    settings: Settings | None = None,
 ) -> None:
     """Показать инструкции по созданию нового MCP instance."""
     auth_commands = {
@@ -155,6 +156,10 @@ async def _show_create_new_instructions(
         )
         return
 
+    # Для типов с auth-командой — сначала создаём instance, потом авторизация
+    if type_key in auth_commands and settings:
+        _create_instance_for_auth(settings, pid, type_key)
+
     cmd = auth_commands.get(type_key)
     if cmd:
         type_name = MCP_TYPE_META.get(McpServerType(type_key))
@@ -166,6 +171,43 @@ async def _show_create_new_instructions(
         )
     else:
         await callback.message.edit_text("Неизвестный тип сервиса.")
+
+
+def _create_instance_for_auth(settings: Settings, pid: str, type_key: str) -> None:
+    """Создать MCP instance и подключить к проекту (перед авторизацией)."""
+    project = settings.projects.get(pid)
+    if not project:
+        return
+
+    instance_id = f"{pid}_{type_key}"
+
+    # Не создавать повторно
+    if instance_id in settings.global_config.mcp_instances:
+        if instance_id not in project.mcp_services:
+            project.mcp_services.append(instance_id)
+            enabled_types = get_instance_types(settings, project.mcp_services)
+            project.tool_policy = default_tool_policy(enabled_types)
+            save_settings(settings)
+        return
+
+    # Параметры по типу
+    kwargs: dict = {}
+    if type_key == "gmail":
+        kwargs["credentials_dir"] = f"credentials/{pid}/gmail"
+    elif type_key == "slack":
+        kwargs["token_env"] = f"SLACK_{pid.upper()}_TOKEN"
+
+    settings.global_config.mcp_instances[instance_id] = McpInstanceConfig(
+        type=McpServerType(type_key),
+        **kwargs,
+    )
+    if instance_id not in project.mcp_services:
+        project.mcp_services.append(instance_id)
+
+    enabled_types = get_instance_types(settings, project.mcp_services)
+    project.tool_policy = default_tool_policy(enabled_types)
+    save_settings(settings)
+    logger.info("Создан instance '%s' (%s) для проекта '%s'", instance_id, type_key, pid)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("amcp_e:"))
@@ -230,7 +272,7 @@ async def on_addmcp_create_new(
         await callback.message.edit_text("Проект не найден.")
         return
 
-    await _show_create_new_instructions(callback, pid, type_key, state)
+    await _show_create_new_instructions(callback, pid, type_key, state, settings)
 
 
 @router.callback_query(lambda c: c.data == "amcp_cancel")
