@@ -5,7 +5,21 @@ from __future__ import annotations
 from datetime import datetime
 
 
-def daily_plan_prompt(project_display_name: str, today: datetime) -> str:
+def _thoughts_block(user_thoughts: str | None) -> str:
+    """Блок с мыслями пользователя для вставки в промпт."""
+    if not user_thoughts:
+        return ""
+    return (
+        f"\n\nМои приоритеты и мысли:\n{user_thoughts}\n\n"
+        f"Учти это при составлении плана."
+    )
+
+
+def daily_plan_prompt(
+    project_display_name: str,
+    today: datetime,
+    user_thoughts: str | None = None,
+) -> str:
     """Промпт для утреннего плана дня."""
     weekday_ru = {
         0: "понедельник", 1: "вторник", 2: "среда",
@@ -25,10 +39,15 @@ def daily_plan_prompt(project_display_name: str, today: datetime) -> str:
         f"- Срочные письма, требующие ответа\n"
         f"- Рекомендации по приоритетам\n\n"
         f"Формат: краткий, структурированный, читаемый за 1 минуту."
+        + _thoughts_block(user_thoughts)
     )
 
 
-def weekly_plan_prompt(project_display_name: str, today: datetime) -> str:
+def weekly_plan_prompt(
+    project_display_name: str,
+    today: datetime,
+    user_thoughts: str | None = None,
+) -> str:
     """Промпт для плана на неделю (понедельник утром)."""
     date_str = today.strftime("%d.%m.%Y")
 
@@ -43,10 +62,15 @@ def weekly_plan_prompt(project_display_name: str, today: datetime) -> str:
         f"- Письма и задачи, ожидающие действий\n"
         f"- Рекомендации по приоритетам на неделю\n\n"
         f"Формат: краткий, структурированный, читаемый за 2 минуты."
+        + _thoughts_block(user_thoughts)
     )
 
 
-def weekly_report_prompt(project_display_name: str, today: datetime) -> str:
+def weekly_report_prompt(
+    project_display_name: str,
+    today: datetime,
+    user_thoughts: str | None = None,
+) -> str:
     """Промпт для еженедельного отчёта."""
     date_str = today.strftime("%d.%m.%Y")
 
@@ -65,4 +89,5 @@ def weekly_report_prompt(project_display_name: str, today: datetime) -> str:
         f"- Планы на следующую неделю\n\n"
         f"Формат: краткий, структурированный, читаемый за 3 минуты. "
         f"Акцент на конкретных действиях и результатах."
+        + _thoughts_block(user_thoughts)
     )

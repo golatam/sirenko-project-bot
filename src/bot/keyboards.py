@@ -255,6 +255,15 @@ def mcp_instance_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def skip_planning_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка «Пропустить» для FSM планирования."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="Пропустить", callback_data="plan_skip"),
+        ]]
+    )
+
+
 def mcp_remove_confirm_keyboard(instance_id: str) -> InlineKeyboardMarkup:
     """Клавиатура подтверждения удаления MCP-инстанса."""
     return InlineKeyboardMarkup(

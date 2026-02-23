@@ -182,7 +182,12 @@ class Scheduler:
             except Exception:
                 logger.exception("Ошибка отправки fallback сообщения")
 
-    async def run_manual(self, project_id: str, task_type: str) -> str:
+    async def run_manual(
+        self,
+        project_id: str,
+        task_type: str,
+        user_thoughts: str | None = None,
+    ) -> str:
         """Запустить задачу вручную (для команд /planday, /planweek, /report).
 
         Возвращает текст ответа от агента.
@@ -195,11 +200,11 @@ class Scheduler:
         display_name = project.display_name
 
         if task_type == "daily_plan":
-            prompt = daily_plan_prompt(display_name, now)
+            prompt = daily_plan_prompt(display_name, now, user_thoughts)
         elif task_type == "weekly_plan":
-            prompt = weekly_plan_prompt(display_name, now)
+            prompt = weekly_plan_prompt(display_name, now, user_thoughts)
         elif task_type == "weekly_report":
-            prompt = weekly_report_prompt(display_name, now)
+            prompt = weekly_report_prompt(display_name, now, user_thoughts)
         else:
             return "Неизвестный тип задачи."
 

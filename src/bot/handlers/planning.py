@@ -1,4 +1,7 @@
-"""Обработчики команд планирования: /planday, /planweek, /report."""
+"""Обработчики команд планирования: /planday, /planweek, /report.
+
+FSM-диалог: команда → вопрос о мыслях/приоритетах → генерация плана.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +9,13 @@ import asyncio
 import logging
 
 import anthropic
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
 
+from src.bot.keyboards import skip_planning_keyboard
+from src.bot.states import PlanningStates
 from src.scheduler.scheduler import Scheduler
 from src.settings import Settings
 from src.utils.formatting import bold, format_agent_response
@@ -19,6 +25,22 @@ logger = logging.getLogger(__name__)
 router = Router(name="planning")
 
 _TYPING_INTERVAL = 4.0
+
+# Маппинг task_type → (label, вопрос)
+_TASK_META: dict[str, tuple[str, str]] = {
+    "daily_plan": (
+        "План на сегодня",
+        "Какие у тебя приоритеты и мысли на сегодня?",
+    ),
+    "weekly_plan": (
+        "План на неделю",
+        "Какие у тебя приоритеты и мысли на эту неделю?",
+    ),
+    "weekly_report": (
+        "Отчёт за неделю",
+        "Что важного хочешь отметить в отчёте?",
+    ),
+}
 
 
 async def _keep_typing(chat_id: int, bot, stop: asyncio.Event) -> None:
@@ -41,6 +63,7 @@ async def _run_planning_command(
     project_id: str | None,
     task_type: str,
     label: str,
+    user_thoughts: str | None = None,
 ) -> None:
     """Общая логика для команд планирования."""
     if not project_id:
@@ -54,7 +77,7 @@ async def _run_planning_command(
     )
 
     try:
-        text = await scheduler.run_manual(project_id, task_type)
+        text = await scheduler.run_manual(project_id, task_type, user_thoughts)
     except anthropic.AuthenticationError:
         stop_typing.set()
         await typing_task
@@ -97,46 +120,123 @@ async def _run_planning_command(
         await message.answer(f"{label}\n\n{text}")
 
 
+async def _start_planning_fsm(
+    message: Message,
+    state: FSMContext,
+    project_id: str | None,
+    task_type: str,
+) -> None:
+    """Запуск FSM-диалога: спросить мысли перед генерацией."""
+    if not project_id:
+        await message.answer("Сначала выбери проект командой /project")
+        return
+
+    label, question = _TASK_META[task_type]
+    await state.set_state(PlanningStates.waiting_thoughts)
+    await state.update_data(task_type=task_type, label=label)
+    await message.answer(
+        f"{bold(label)}\n\n{question}\n\n"
+        "Напиши свои мысли или нажми «Пропустить».",
+        parse_mode="HTML",
+        reply_markup=skip_planning_keyboard(),
+    )
+
+
+# --- Команды ---
+
 @router.message(Command("planday"))
 async def cmd_planday(
     message: Message,
+    state: FSMContext,
     project_id: str | None = None,
     scheduler: Scheduler = None,
     **kwargs,
 ) -> None:
     """План на сегодня."""
-    await _run_planning_command(
-        message, scheduler, project_id,
-        task_type="daily_plan",
-        label="План на сегодня",
-    )
+    await _start_planning_fsm(message, state, project_id, "daily_plan")
 
 
 @router.message(Command("planweek"))
 async def cmd_planweek(
     message: Message,
+    state: FSMContext,
     project_id: str | None = None,
     scheduler: Scheduler = None,
     **kwargs,
 ) -> None:
     """План на неделю."""
-    await _run_planning_command(
-        message, scheduler, project_id,
-        task_type="weekly_plan",
-        label="План на неделю",
-    )
+    await _start_planning_fsm(message, state, project_id, "weekly_plan")
 
 
 @router.message(Command("report"))
 async def cmd_report(
     message: Message,
+    state: FSMContext,
     project_id: str | None = None,
     scheduler: Scheduler = None,
     **kwargs,
 ) -> None:
     """Отчёт за неделю."""
+    await _start_planning_fsm(message, state, project_id, "weekly_report")
+
+
+# --- FSM: получение мыслей (текст) ---
+
+@router.message(PlanningStates.waiting_thoughts)
+async def on_planning_thoughts(
+    message: Message,
+    state: FSMContext,
+    project_id: str | None = None,
+    scheduler: Scheduler = None,
+    **kwargs,
+) -> None:
+    """Пользователь написал мысли/приоритеты."""
+    data = await state.get_data()
+    await state.clear()
+
+    task_type = data["task_type"]
+    label = data["label"]
+
     await _run_planning_command(
         message, scheduler, project_id,
-        task_type="weekly_report",
-        label="Отчёт за неделю",
+        task_type=task_type,
+        label=label,
+        user_thoughts=message.text,
+    )
+
+
+# --- FSM: кнопка «Пропустить» ---
+
+@router.callback_query(F.data == "plan_skip")
+async def on_planning_skip(
+    callback: CallbackQuery,
+    state: FSMContext,
+    project_id: str | None = None,
+    scheduler: Scheduler = None,
+    **kwargs,
+) -> None:
+    """Пользователь нажал «Пропустить» — генерация без мыслей."""
+    data = await state.get_data()
+    await state.clear()
+
+    task_type = data.get("task_type")
+    label = data.get("label")
+
+    if not task_type or not label:
+        await callback.answer("Сессия устарела. Вызови команду заново.")
+        return
+
+    await callback.answer()
+
+    # Убираем кнопку из сообщения с вопросом
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    await _run_planning_command(
+        callback.message, scheduler, project_id,
+        task_type=task_type,
+        label=label,
+        user_thoughts=None,
     )

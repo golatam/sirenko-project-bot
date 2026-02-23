@@ -53,6 +53,11 @@ class RemoveMcpStates(StatesGroup):
     confirm = State()
 
 
+class PlanningStates(StatesGroup):
+    """FSM для /planday, /planweek, /report — ввод мыслей перед генерацией."""
+    waiting_thoughts = State()
+
+
 class AddMcpCalendarStates(StatesGroup):
     """FSM для добавления Calendar через /addmcp."""
     google_account = State()
