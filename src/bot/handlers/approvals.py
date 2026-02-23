@@ -5,18 +5,39 @@ from __future__ import annotations
 import json
 import logging
 
+import anthropic
 from aiogram import Router
 from aiogram.types import CallbackQuery
 
 from src.agent.core import AgentCore, PendingApproval
 from src.db.database import Database
 from src.db.queries import get_pending_approval, resolve_approval
-from src.utils.formatting import bold, format_agent_response
+from src.utils.formatting import bold, escape, format_agent_response
 from src.utils.tokens import format_tokens
 
 logger = logging.getLogger(__name__)
 
 router = Router(name="approvals")
+
+
+async def _safe_edit(callback: CallbackQuery, html_text: str) -> None:
+    """Отправить результат в Telegram с fallback на plain text и send_message."""
+    from src.utils.formatting import truncate
+    try:
+        await callback.message.edit_text(truncate(html_text), parse_mode="HTML")
+    except Exception:
+        logger.warning("HTML edit_text не удался, fallback на plain text")
+        try:
+            # Убираем HTML-теги для plain text
+            import re
+            plain = re.sub(r"<[^>]+>", "", html_text)
+            await callback.message.edit_text(truncate(plain))
+        except Exception:
+            logger.warning("edit_text не удался, отправляю новым сообщением")
+            try:
+                await callback.message.answer(truncate(html_text), parse_mode="HTML")
+            except Exception:
+                logger.exception("Не удалось отправить результат в Telegram")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("approve:"))
@@ -59,26 +80,45 @@ async def on_approve(callback: CallbackQuery, db: Database = None,
         messages_snapshot=messages_snapshot,
     )
 
+    # Фаза 1: выполняем инструмент и получаем ответ агента
     try:
         result = await agent.execute_approved_tool(
             project_id=approval_req.project_id,
             approval=pending,
         )
-        response_text = format_agent_response(result.text) if result.text else "Действие выполнено."
-        meta = (
-            f"\n\n<i>{result.model} | "
-            f"{format_tokens(result.tokens_input)}→{format_tokens(result.tokens_output)}</i>"
-        )
+    except anthropic.RateLimitError:
+        logger.warning("429 Rate Limit при выполнении подтверждённого действия #%d", approval_id)
         await callback.message.edit_text(
-            f"Подтверждено\n\n{response_text}{meta}",
+            f"Превышен лимит запросов при выполнении {bold(approval_req.tool_name)}. "
+            "Подожди пару минут и повтори запрос.",
             parse_mode="HTML",
         )
-    except Exception:
+        return
+    except anthropic.APIStatusError as e:
+        logger.exception("API ошибка %d при выполнении действия #%d", e.status_code, approval_id)
+        if e.status_code == 529:
+            error_text = "API Claude перегружен. Попробуй через пару минут."
+        else:
+            error_text = f"Ошибка API (код {e.status_code}) при выполнении {bold(approval_req.tool_name)}."
+        await callback.message.edit_text(error_text, parse_mode="HTML")
+        return
+    except Exception as e:
         logger.exception("Ошибка при выполнении подтверждённого действия #%d", approval_id)
-        await callback.message.edit_text(
-            f"Ошибка при выполнении {bold(approval_req.tool_name)}. Попробуй ещё раз.",
-            parse_mode="HTML",
+        error_detail = str(e)[:200] if str(e) else type(e).__name__
+        await _safe_edit(
+            callback,
+            f"Ошибка при выполнении {bold(approval_req.tool_name)}:\n"
+            f"<code>{escape(error_detail)}</code>",
         )
+        return
+
+    # Фаза 2: отправляем результат в Telegram (инструмент уже выполнен!)
+    response_text = format_agent_response(result.text) if result.text else "Действие выполнено."
+    meta = (
+        f"\n\n<i>{result.model} | "
+        f"{format_tokens(result.tokens_input)}→{format_tokens(result.tokens_output)}</i>"
+    )
+    await _safe_edit(callback, f"Подтверждено\n\n{response_text}{meta}")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("reject:"))

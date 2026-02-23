@@ -43,12 +43,16 @@ def format_agent_response(text: str) -> str:
     """Преобразовать Markdown-ответ агента в Telegram HTML.
 
     Базовое преобразование наиболее частых паттернов.
+    Сначала экранируем HTML-сущности, потом конвертируем markdown.
     """
-    # Telegram поддерживает ограниченный HTML, поэтому делаем минимум
-    # Claude обычно отвечает в Markdown — конвертируем основное
-    result = text
-    # **bold** -> <b>bold</b>
     import re
+
+    # 1. Экранируем HTML-сущности ДО конвертации markdown
+    #    Иначе <email@example.com> ломает Telegram HTML parser
+    result = html.escape(text)
+
+    # 2. Конвертируем markdown → HTML
+    # **bold** -> <b>bold</b>
     result = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", result)
     # *italic* -> <i>italic</i>
     result = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", result)

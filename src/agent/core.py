@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -360,10 +361,13 @@ class AgentCore:
         model = self.settings.global_config.default_model
         messages = approval.messages_snapshot
 
+        # Фаза 1: вызов MCP-инструмента
+        tool_ok = False
         start = time.monotonic()
         try:
             result_text = await self.mcp.call_tool(approval.tool_name, approval.tool_input)
             latency = int((time.monotonic() - start) * 1000)
+            tool_ok = True
             await log_tool_call(
                 self.db, project_id, approval.tool_name, approval.tool_input,
                 result_text, model, latency_ms=latency,
@@ -381,42 +385,52 @@ class AgentCore:
             "content": [{
                 "type": "tool_result",
                 "tool_use_id": approval.tool_use_id,
-                "content": result_text,
+                "content": self._truncate_tool_result(result_text),
             }],
         })
 
-        project = self.settings.projects[project_id]
-        connected = self._get_connected_services(project_id)
-        system_prompt = build_system_prompt(project_id, project, project.phase, connected)
-        project_tools = self.mcp.get_project_tools(project_id)
-        anthropic_tools = mcp_tools_to_anthropic(project_tools)
+        # Фаза 2: получаем ответ Claude (если упадёт — не скрываем что tool выполнен)
+        try:
+            project = self.settings.projects[project_id]
+            connected = self._get_connected_services(project_id)
+            system_prompt = build_system_prompt(project_id, project, project.phase, connected)
+            project_tools = self.mcp.get_project_tools(project_id)
+            anthropic_tools = mcp_tools_to_anthropic(project_tools)
 
-        response = await self._call_claude(
-            model=model,
-            system=system_prompt,
-            messages=messages,
-            tools=anthropic_tools if anthropic_tools else None,
-        )
+            response = await self._call_claude(
+                model=model,
+                system=system_prompt,
+                messages=messages,
+                tools=anthropic_tools if anthropic_tools else None,
+            )
 
-        text = self._extract_text(response)
+            text = self._extract_text(response)
 
-        await save_message(
-            self.db, project_id, "assistant", json.dumps(text),
-            tokens_input=response.usage.input_tokens,
-            tokens_output=response.usage.output_tokens,
-        )
-        await track_cost(
-            self.db, project_id, model,
-            response.usage.input_tokens, response.usage.output_tokens,
-        )
+            await save_message(
+                self.db, project_id, "assistant", json.dumps(text),
+                tokens_input=response.usage.input_tokens,
+                tokens_output=response.usage.output_tokens,
+            )
+            await track_cost(
+                self.db, project_id, model,
+                response.usage.input_tokens, response.usage.output_tokens,
+            )
 
-        return AgentResponse(
-            text=text,
-            tool_calls_count=1,
-            tokens_input=response.usage.input_tokens,
-            tokens_output=response.usage.output_tokens,
-            model=model,
-        )
+            return AgentResponse(
+                text=text,
+                tool_calls_count=1,
+                tokens_input=response.usage.input_tokens,
+                tokens_output=response.usage.output_tokens,
+                model=model,
+            )
+        except Exception as e:
+            # Claude API упал, но инструмент мог уже выполниться
+            logger.exception("Claude API ошибка после выполнения %s", approval.tool_name)
+            if tool_ok:
+                # Инструмент выполнен, возвращаем результат вместо ошибки
+                fallback = f"Действие {approval.tool_name} выполнено.\n\nРезультат: {self._truncate_tool_result(result_text, 500)}"
+                return AgentResponse(text=fallback, tool_calls_count=1, model=model)
+            raise
 
     async def _call_claude(
         self,
@@ -455,26 +469,53 @@ class AgentCore:
         logger.info("→ API вызов: model=%s, max_tokens=%d, msgs=%d, tools=%s",
                     model, kwargs["max_tokens"], len(messages),
                     len(tools) if tools else 0)
-        try:
-            result = await self.client.messages.create(**kwargs)
-            logger.info("← API ответ: input=%d, output=%d, stop=%s",
-                        result.usage.input_tokens, result.usage.output_tokens,
-                        result.stop_reason)
-            return result
-        except anthropic.AuthenticationError:
-            if not self._refresher:
+
+        # Retry-логика поверх SDK: при 429/529 ждём дольше и пробуем ещё
+        max_extra_retries = 3
+        for attempt in range(max_extra_retries + 1):
+            try:
+                result = await self.client.messages.create(**kwargs)
+                logger.info("← API ответ: input=%d, output=%d, stop=%s",
+                            result.usage.input_tokens, result.usage.output_tokens,
+                            result.stop_reason)
+                return result
+            except anthropic.AuthenticationError:
+                if not self._refresher:
+                    raise
+                # OAuth токен истёк — пробуем обновить и retry
+                logger.warning("← 401 AuthenticationError, пробуем refresh токена...")
+                await self._refresh_and_recreate_client()
+                result = await self.client.messages.create(**kwargs)
+                logger.info("← API ответ (после refresh): input=%d, output=%d, stop=%s",
+                            result.usage.input_tokens, result.usage.output_tokens,
+                            result.stop_reason)
+                return result
+            except anthropic.RateLimitError as e:
+                # SDK уже сделал свои retry — ждём дольше
+                if attempt >= max_extra_retries:
+                    logger.error("← 429 Rate Limit: все %d доп. попыток исчерпаны", max_extra_retries)
+                    raise
+                # Берём retry-after из заголовков или ждём 15-30-60 сек
+                retry_after = None
+                if hasattr(e, "response") and e.response is not None:
+                    retry_after = e.response.headers.get("retry-after")
+                wait = int(retry_after) if retry_after else 15 * (2 ** attempt)
+                logger.warning("← 429 Rate Limit, попытка %d/%d, жду %d сек...",
+                               attempt + 1, max_extra_retries, wait)
+                await asyncio.sleep(wait)
+                continue
+            except anthropic.APIStatusError as e:
+                if e.status_code == 529 and attempt < max_extra_retries:
+                    wait = 10 * (2 ** attempt)
+                    logger.warning("← 529 Overloaded, попытка %d/%d, жду %d сек...",
+                                   attempt + 1, max_extra_retries, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("← API ошибка: %s", e)
                 raise
-            # OAuth токен истёк — пробуем обновить и retry
-            logger.warning("← 401 AuthenticationError, пробуем refresh токена...")
-            await self._refresh_and_recreate_client()
-            result = await self.client.messages.create(**kwargs)
-            logger.info("← API ответ (после refresh): input=%d, output=%d, stop=%s",
-                        result.usage.input_tokens, result.usage.output_tokens,
-                        result.stop_reason)
-            return result
-        except Exception as e:
-            logger.error("← API ошибка: %s", e)
-            raise
+            except Exception as e:
+                logger.error("← API ошибка: %s", e)
+                raise
 
     async def _refresh_and_recreate_client(self) -> None:
         """Обновить OAuth токен и пересоздать Anthropic-клиент."""
