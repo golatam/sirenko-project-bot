@@ -1,15 +1,20 @@
 # Sirenko Project Bot
 
-AI-агент для управления бизнес-проектами через Telegram. Один бот, несколько проектов — каждый со своими аккаунтами Gmail, Google Calendar и Telegram.
+AI-агент для управления бизнес-проектами через Telegram. Один бот, несколько проектов — каждый со своими MCP-сервисами (Gmail, Calendar, Telegram, Slack, Confluence, Jira, WhatsApp).
 
 ## Что умеет
 
-- **Чтение и поиск email** через Gmail MCP
-- **Управление календарём** через Google Calendar MCP
-- **Мониторинг Telegram-чатов** через Telegram MCP (Phase 4)
-- **Переключение между проектами** — полная изоляция данных и инструментов
-- **Human-in-the-loop** — подтверждение опасных действий через inline-кнопки
+- **Email** — чтение, поиск, отправка через Gmail MCP
+- **Календарь** — события, создание, управление через Google Calendar MCP
+- **Telegram** — мониторинг чатов, отправка сообщений через Telegram MCP (MTProto User API, 87 tools)
+- **Slack** — чтение каналов, отправка сообщений через Slack MCP (14 tools)
+- **Confluence** — чтение и создание страниц через Confluence MCP
+- **Jira** — задачи и проекты через Jira MCP
+- **WhatsApp** — сообщения через WhatsApp MCP (Baileys)
+- **Мульти-проект** — полная изоляция данных, инструментов и аккаунтов между проектами
+- **Human-in-the-loop** — подтверждение опасных действий через inline-кнопки в Telegram
 - **Трекинг расходов** — стоимость API по дням, проектам и моделям
+- **OAuth авто-рефреш** — access_token обновляется автоматически через refresh_token при истечении
 
 ## Архитектура
 
@@ -18,20 +23,26 @@ AI-агент для управления бизнес-проектами чер
                   ↓
              Project Router (FSM: активный проект)
                   ↓
-             Haiku Classifier → нужны ли tools? какие?
+             Haiku Classifier → нужны ли tools? какие категории?
                   ↓
              Agent Core (Anthropic SDK, tool_use loop)
                │  Sonnet 4.6 — рутинные задачи
                │  Opus 4.6   — сложные задачи (по запросу)
+               │  Haiku 4.5  — классификация + простые ответы
                   ↓
-             MCP Client Manager
-             ├── Gmail MCP (npx, инстанс на аккаунт)
-             ├── Calendar MCP (npx, нативный multi-account)
-             └── Telegram MCP (uv, инстанс на аккаунт)
+             MCP Client Manager (instance-based, refcount sharing)
+             ├── Gmail MCP        (npx, инстанс на аккаунт)
+             ├── Calendar MCP     (npx, нативный multi-account)
+             ├── Telegram MCP     (uv, инстанс на аккаунт)
+             ├── Slack MCP        (npx, инстанс на workspace)
+             ├── Confluence MCP   (npx, инстанс на site)
+             ├── Jira MCP         (npx, инстанс на site)
+             └── WhatsApp MCP     (node, инстанс на аккаунт)
 
 + SQLite         — история, расходы, подтверждения
 + Prompt Caching — экономия ~60-70% на повторных запросах
 + Summarization  — автосжатие истории через Haiku
++ OAuth Refresh  — авто-обновление токена при 401
 ```
 
 ## Быстрый старт
@@ -40,7 +51,7 @@ AI-агент для управления бизнес-проектами чер
 
 - Python 3.12+
 - Node.js 20+ (для npx MCP-серверов)
-- Аккаунт Anthropic с API-ключом
+- Аккаунт Anthropic (API key или подписка Claude Max для OAuth)
 - Telegram Bot Token (от @BotFather)
 
 ### Установка
@@ -57,71 +68,107 @@ pip install anthropic "mcp>=1.9" "aiogram>=3.25" aiosqlite pyyaml pydantic "pyda
 
 ### Настройка
 
-1. **Переменные окружения:**
+1. **Переменные окружения** (`.env` или export):
 
 ```bash
-export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
-export ANTHROPIC_API_KEY="sk-ant-..."
-export OWNER_TELEGRAM_ID="123456789"  # твой Telegram user ID
+# Обязательные
+TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
+OWNER_TELEGRAM_ID="123456789"
+
+# Вариант 1: API key
+ANTHROPIC_API_KEY="sk-ant-api03-..."
+
+# Вариант 2: OAuth (подписка Claude Max)
+ANTHROPIC_AUTH_TOKEN="sk-ant-oat01-..."
+ANTHROPIC_REFRESH_TOKEN="sk-ant-ort01-..."  # для авто-рефреша
+AUTH_METHOD=oauth
 ```
 
-2. **Конфигурация проекта** — отредактируй `config/projects.yaml`:
+2. **OAuth-авторизация** (если подписка Claude Max):
+
+```bash
+python3.12 -m src.auth_setup
+# Извлекает access + refresh token из macOS Keychain
+# Сохраняет в .env, refresh_token позволяет авто-обновление каждые 8 часов
+```
+
+3. **Конфигурация проекта** — `config/projects.yaml`:
 
 ```yaml
 global:
-  owner_telegram_id: 123456789  # ← твой ID
-  default_model: "claude-sonnet-4-6"
-  phase: "read_only"
+  owner_telegram_id: 123456789
+  auth_method: oauth  # или api_key
+  mcp_instances:
+    flexify_gmail:
+      type: gmail
+      credentials_dir: credentials/flexify/gmail
+    flexify_calendar:
+      type: calendar
+      account_id: user@gmail.com
+    flexify_slack:
+      type: slack
+      token_env: SLACK_FLEXIFY_TOKEN
 
 projects:
-  alpha:
-    display_name: "Мой проект"
-    gmail:
-      enabled: true
-      credentials_dir: "credentials/project_alpha/gmail"
-    calendar:
-      enabled: true
-      account_id: "my@gmail.com"
+  flexify:
+    display_name: Flexify
+    phase: controlled
+    mcp_services:
+      - flexify_gmail
+      - flexify_calendar
+      - flexify_slack
 ```
 
-3. **Gmail OAuth** (если включён Gmail):
-
-```bash
-# Положить client_secret.json от Google Cloud Console в:
-mkdir -p credentials/project_alpha/gmail
-cp ~/Downloads/client_secret_*.json credentials/project_alpha/gmail/credentials.json
-
-# При первом запуске MCP-сервер откроет браузер для авторизации
-```
-
-4. **Системный промпт** — отредактируй `config/prompts/project_alpha.md` под свой проект.
+4. **Системный промпт** — создать `config/prompts/<project_id>.md` с описанием проекта.
 
 ### Запуск
 
 ```bash
 source .venv/bin/activate
-python3.12 -m src.main
+PYTHONUNBUFFERED=1 python3.12 -m src.main
 ```
 
 Открой бота в Telegram → `/start` → пиши запросы.
 
-## Команды бота
+## Команды бота (14)
 
 | Команда | Описание |
 |---------|----------|
-| `/start` | Приветствие, автовыбор проекта |
+| `/start` | Приветствие + интерактивное меню |
 | `/project` | Переключить активный проект |
-| `/status` | Статус проекта (фаза, сервисы) |
+| `/status` | Статус проекта и MCP-сервисов |
 | `/costs` | Расходы за последние 7 дней |
 | `/clear` | Очистить историю разговора |
-| `/help` | Справка по командам |
+| `/help` | Навигируемая справка по категориям |
+| `/addproject` | Создать новый проект (FSM-диалог) |
+| `/deleteproject` | Удалить проект |
+| `/addmcp` | Подключить MCP-сервис к проекту |
+| `/removemcp` | Отключить MCP-сервис от проекта |
+| `/authgmail` | Авторизация Gmail (Google OAuth) |
+| `/authtelegram` | Авторизация Telegram MCP (MTProto) |
+| `/authslack` | Авторизация Slack (xoxp-токен) |
+| `/authatlassian` | Авторизация Jira/Confluence (Atlassian) |
 
-## Фазы работы
+Все команды зарегистрированы через `set_my_commands` — видны в меню Telegram при `/`.
 
-Агент работает в одной из трёх фаз — каждая определяет, какие инструменты доступны:
+## MCP-серверы (7 типов)
 
-| Фаза | Чтение | Черновики | Отправка |
-|------|--------|-----------|----------|
+| Тип | Пакет | Транспорт | Prefix | Tools |
+|-----|-------|-----------|--------|-------|
+| Gmail | `@gongrzhe/server-gmail-autoauth-mcp` | npx | — | search_emails, read_email, send_email... |
+| Calendar | `@cocal/google-calendar-mcp` | npx | — | list-events, create-event, get-event... |
+| Telegram | `chigwell/telegram-mcp` | uv (local) | `tg_` | 87 tools (MTProto User API) |
+| Slack | `slack-mcp-server` | npx | `slack_` | 14 tools (xoxp token) |
+| Confluence | `@aashari/mcp-server-atlassian-confluence` | npx | — | conf_get/post/put/patch/delete |
+| Jira | `@aashari/mcp-server-atlassian-jira` | npx | — | jira_get/post/put/patch/delete |
+| WhatsApp | `jlucaso1/whatsapp-mcp-ts` | node (local) | `wa_` | 7 tools (Baileys, Node >= 23.10) |
+
+**Instance sharing**: один MCP-процесс обслуживает несколько проектов через refcount.
+
+## Фазы работы (tool_policy)
+
+| Фаза | Чтение | Черновики | Отправка/Удаление |
+|------|--------|-----------|-------------------|
 | `read_only` | да | нет | нет |
 | `drafts` | да | с подтверждением | нет |
 | `controlled` | да | да | с подтверждением |
@@ -133,16 +180,20 @@ python3.12 -m src.main
 ```
 sirenko-project-bot/
 ├── pyproject.toml                 # Зависимости
+├── Dockerfile                     # Multi-stage: Python 3.12 + Node.js 20
+├── railway.toml                   # Railway deploy config
 ├── config/
-│   ├── projects.yaml              # Конфигурация проектов
-│   └── prompts/
-│       └── project_alpha.md       # Системный промпт проекта
+│   ├── projects.yaml              # Конфигурация проектов + MCP instances
+│   └── prompts/                   # Системные промпты проектов
 ├── credentials/                   # .gitignored — OAuth-токены
 ├── src/
 │   ├── main.py                    # Точка входа
 │   ├── settings.py                # Pydantic-конфиг из YAML + env
+│   ├── auth_setup.py              # Настройка OAuth (Keychain → .env)
+│   ├── bootstrap_credentials.py   # Восстановление credentials для контейнера
 │   ├── agent/
 │   │   ├── core.py                # Агентный цикл (tool_use loop)
+│   │   ├── auth.py                # OAuth авто-рефреш (OAuthRefresher)
 │   │   ├── classifier.py          # Haiku-классификатор запросов
 │   │   ├── summarizer.py          # Автосжатие истории
 │   │   ├── prompts.py             # Сборка системного промпта
@@ -150,24 +201,31 @@ sirenko-project-bot/
 │   │   └── tools.py               # MCP → Anthropic schema
 │   ├── bot/
 │   │   ├── handlers/
-│   │   │   ├── commands.py        # /start /project /help /status
+│   │   │   ├── commands.py        # /start /project /help /status /costs /clear
+│   │   │   ├── project_management.py  # /addproject /deleteproject
+│   │   │   ├── mcp_management.py  # /addmcp /removemcp
+│   │   │   ├── auth.py            # /authgmail
+│   │   │   ├── auth_telegram.py   # /authtelegram
+│   │   │   ├── auth_slack.py      # /authslack
+│   │   │   ├── auth_atlassian.py  # /authatlassian
 │   │   │   ├── queries.py         # Свободный текст → агент
 │   │   │   └── approvals.py       # Inline-кнопки подтверждения
 │   │   ├── middlewares/
 │   │   │   ├── auth.py            # Доступ только владельцу
 │   │   │   └── project_context.py # Инъекция активного проекта
 │   │   ├── keyboards.py           # Inline-клавиатуры
-│   │   └── states.py              # FSM-состояния
+│   │   └── states.py              # FSM-состояния (8 StatesGroup)
 │   ├── mcp/
-│   │   ├── manager.py             # Жизненный цикл MCP-серверов
-│   │   ├── client.py              # Подключение к одному MCP
-│   │   └── registry.py            # Маршрутизация tool → server
+│   │   ├── types.py               # McpServerType enum, McpInstanceConfig, MCP_TYPE_META
+│   │   ├── factory.py             # Фабрика StdioServerParameters по типу
+│   │   ├── manager.py             # Lifecycle менеджер с refcount
+│   │   ├── client.py              # MCP клиент (stdio transport)
+│   │   └── registry.py            # Реестр инструментов с namespace prefix
 │   ├── db/
 │   │   ├── database.py            # aiosqlite + автомиграции
 │   │   ├── models.py              # Dataclass-модели
 │   │   ├── queries.py             # CRUD + трекинг расходов
-│   │   └── migrations/
-│   │       └── 001_initial.sql    # Таблицы: conversations, tool_calls, costs...
+│   │   └── migrations/            # SQL-миграции (001_, 002_...)
 │   └── utils/
 │       ├── logging.py             # Настройка логов
 │       ├── tokens.py              # Оценка и форматирование токенов
@@ -183,26 +241,27 @@ System prompt и tool definitions кешируются через Anthropic API.
 ### Haiku-классификатор
 Перед основным вызовом Sonnet, запрос проходит через Haiku (~$0.0003):
 - Определяет нужны ли инструменты
-- Если нужны — какие категории (gmail, calendar, telegram)
+- Если нужны — какие категории (gmail, calendar, telegram, slack, confluence, jira, whatsapp)
 - Простые запросы ("спасибо", "ок") обрабатываются без tools
 
 ### History Summarization
 При > 16 сообщений в истории, старые автоматически сжимаются в резюме через Haiku (~$0.003). Вместо 30K токенов истории → ~5K.
 
-### Оценка расходов
+## OAuth авторизация
 
-| Сценарий | Claude API | Railway | Итого |
-|----------|-----------|---------|-------|
-| Лёгкий (15 запросов/день) | $15/мес | $5-8 | **$20-23** |
-| Средний (40 запросов/день) | $30-40/мес | $5-8 | **$35-48** |
+Два метода авторизации Anthropic API:
 
-## MCP-серверы
+| Метод | Переменная | Описание |
+|-------|-----------|----------|
+| `api_key` | `ANTHROPIC_API_KEY` | Стандартный API-ключ |
+| `oauth` | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_REFRESH_TOKEN` | Подписка Claude Max |
 
-| Сервис | Пакет | Мультиаккаунт |
-|--------|-------|---------------|
-| Gmail | `npx @gongrzhe/server-gmail-autoauth-mcp` | Отдельные инстансы на аккаунт |
-| Calendar | `npx @cocal/google-calendar-mcp` | Нативный (manage-accounts) |
-| Telegram | `uv run` chigwell/telegram-mcp | Отдельные инстансы на аккаунт |
+**OAuth авто-рефреш**: access_token живёт 8 часов. При получении 401 `OAuthRefresher` автоматически обновляет токен через refresh_token и продолжает работу. Новые токены сохраняются in-memory + `.env`.
+
+Настройка:
+```bash
+python3.12 -m src.auth_setup  # Извлекает оба токена из macOS Keychain
+```
 
 ## Деплой на Railway
 
@@ -213,14 +272,18 @@ Volume: 1 GB для SQLite + credentials
 Стоимость: ~$5-8/мес
 ```
 
+Env vars в Railway dashboard:
+- `TELEGRAM_BOT_TOKEN`, `OWNER_TELEGRAM_ID`
+- `ANTHROPIC_API_KEY` или `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_REFRESH_TOKEN` + `AUTH_METHOD=oauth`
+- `CRED_*` — base64-encoded credentials для bootstrap
+
 ## Дорожная карта
 
-- [x] Phase 1 — Бот + агентный цикл + Gmail read-only
-- [x] Phase 1b — Prompt caching, Haiku-классификатор, summarization
-- [ ] Phase 2 — Второй проект + Calendar + /context + /remember
-- [ ] Phase 3 — Approvals + Drafts + inline-подтверждения
-- [ ] Phase 4 — Telegram MCP + мониторинг чатов + шедулер
-- [ ] Phase 5 — Railway деплой + Dockerfile + health checks
+- [x] Phase 1 — Бот + агентный цикл + Gmail read-only + prompt caching + Haiku-классификатор + summarization
+- [x] Phase 2 — Multi-project + instance-based MCP (7 типов) + 14 команд + динамическое управление MCP + OAuth авто-рефреш
+- [ ] Phase 3 — Шедулер + проактивные уведомления
+- [ ] Phase 4 — Расширенная аналитика + дашборд
+- [ ] Phase 5 — Multi-user + RBAC
 
 ## Лицензия
 

@@ -124,18 +124,6 @@ def approval_keyboard(approval_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def services_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура выбора сервисов для нового проекта."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Gmail + Calendar", callback_data="addproj_svc:both")],
-            [InlineKeyboardButton(text="Только Gmail", callback_data="addproj_svc:gmail")],
-            [InlineKeyboardButton(text="Только Calendar", callback_data="addproj_svc:calendar")],
-            [InlineKeyboardButton(text="Без сервисов", callback_data="addproj_svc:none")],
-        ]
-    )
-
-
 def confirm_create_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура подтверждения создания проекта."""
     return InlineKeyboardMarkup(

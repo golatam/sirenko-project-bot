@@ -13,8 +13,6 @@ class AddProjectStates(StatesGroup):
     project_id = State()
     display_name = State()
     description = State()
-    services = State()       # выбор сервисов (Gmail / Calendar / оба / нет)
-    google_account = State()  # email Google-аккаунта (если есть сервисы)
     confirm = State()
 
 

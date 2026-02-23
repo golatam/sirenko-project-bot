@@ -38,6 +38,7 @@ python3.12 -m pytest tests/
 ### Ядро агента
 - `src/main.py` — точка входа (bot + MCP + DB + set_my_commands)
 - `src/agent/core.py` — ядро: цикл tool_use с Claude API
+- `src/agent/auth.py` — авто-рефреш OAuth токена при 401 (OAuthRefresher + asyncio.Lock)
 - `src/agent/classifier.py` — Haiku-классификатор запросов (динамический по MCP-типам)
 - `src/agent/summarizer.py` — автосжатие истории
 - `src/agent/prompts.py` — сборка системных промптов + генерация промпт-файлов
@@ -123,8 +124,9 @@ python3.12 -m pytest tests/
 - Используй `python3.12` (не `python3` — на системе 3.9)
 - venv в `.venv/` — уже создан
 - Модели: `claude-sonnet-4-6` (default), `claude-opus-4-6` (complex), `claude-haiku-4-5` (classifier)
-- Auth: два метода — `api_key` (ANTHROPIC_API_KEY) или `oauth` (ANTHROPIC_AUTH_TOKEN от подписки Claude)
+- Auth: два метода — `api_key` (ANTHROPIC_API_KEY) или `oauth` (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_REFRESH_TOKEN от подписки Claude)
 - Переключение: `auth_method: oauth` в `config/projects.yaml` → global
+- OAuth авто-рефреш: при 401 OAuthRefresher обновляет access_token через refresh_token автоматически
 - Не хардкодь API-ключи — только через env vars
 - SQLite миграции в `src/db/migrations/` — нумерация `001_`, `002_`...
 - Конфиг проектов в `config/projects.yaml`
