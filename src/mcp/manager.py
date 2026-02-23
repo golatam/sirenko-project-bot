@@ -148,7 +148,7 @@ class MCPManager:
                 instance_id, config.type.value, len(client.get_tools()),
             )
         except Exception:
-            logger.error(
+            logger.exception(
                 "Не удалось запустить instance '%s' (%s)",
                 instance_id, config.type.value,
             )

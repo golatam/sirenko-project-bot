@@ -503,7 +503,11 @@ class AgentCore:
         return categories
 
     def _get_connected_services(self, project_id: str) -> list[str]:
-        """Получить display_name подключённых MCP-сервисов для системного промпта."""
+        """Получить display_name реально запущенных MCP-сервисов для системного промпта.
+
+        Проверяет не только конфиг, но и фактический статус — instance
+        должен быть в mcp.instances (т.е. MCP-сервер запущен и зарегистрирован).
+        """
         project = self.settings.projects.get(project_id)
         if not project:
             return []
@@ -511,6 +515,9 @@ class AgentCore:
         services: list[str] = []
         seen_types: set[str] = set()
         for instance_id in project.mcp_services:
+            # Проверяем что instance реально запущен
+            if instance_id not in self.mcp.instances:
+                continue
             inst = self.settings.global_config.mcp_instances.get(instance_id)
             if not inst:
                 continue
