@@ -25,5 +25,7 @@ COPY config/ config/
 RUN mkdir -p data
 
 ENV PYTHONUNBUFFERED=1
+# Persistent config на volume — переживает редеплой
+ENV CONFIG_PATH=data/projects.yaml
 
 CMD ["python3.12", "-m", "src.main"]

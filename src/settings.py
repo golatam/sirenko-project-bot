@@ -201,6 +201,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
     load_dotenv(env_path)
 
     path = _resolve_config_path(config_path)
+    logger.info("Конфиг: %s (persistent=%s)", path, path != _DEFAULT_CONFIG_PATH)
 
     if path.exists():
         with open(path) as f:
@@ -230,6 +231,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
         settings.anthropic_auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
         settings.anthropic_refresh_token = os.environ.get("ANTHROPIC_REFRESH_TOKEN", "")
 
+    logger.info(
+        "Загружено проектов: %d, MCP-инстансов: %d",
+        len(settings.projects),
+        len(settings.global_config.mcp_instances),
+    )
     return settings
 
 
