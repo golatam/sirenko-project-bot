@@ -59,7 +59,7 @@ python3.12 -m pytest tests/
 - `src/bot/handlers/auth_slack.py` — /authslack (xoxp-токен)
 - `src/bot/handlers/auth_atlassian.py` — /authatlassian (site → email → token → Confluence/Jira)
 - `src/bot/handlers/queries.py` — обработка свободного текста (catch-all)
-- `src/bot/handlers/approvals.py` — inline-кнопки подтверждения/отклонения действий
+- `src/bot/handlers/approvals.py` — inline-кнопки подтверждения/отклонения действий + `_safe_edit` fallback
 - `src/bot/states.py` — FSM-состояния (8 StatesGroup)
 - `src/bot/keyboards.py` — inline-клавиатуры (меню, help-навигация, MCP type/instance selectors)
 - `src/bot/middlewares/project_context.py` — инъекция активного проекта
@@ -140,6 +140,23 @@ python3.12 -m pytest tests/
 - Prompt caching: system prompt + tools кешируются (экономия ~60-70%)
 - Classifier (Haiku) определяет нужны ли tools и какие категории (динамически из MCP_TYPE_META)
 - System prompt содержит динамический блок "Подключённые сервисы" (только реально запущенные MCP)
+- Retry-логика: при 429/529 до 3 доп. попыток с exponential backoff (15/30/60 сек)
+
+### Batch tool_use + approval
+
+Когда Claude вызывает несколько tools в одном ответе и один из них требует подтверждения:
+1. Уже обработанные tools → их `tool_result` сохраняются в snapshot
+2. Approval tool → placeholder `[ожидание подтверждения]`
+3. Оставшиеся tools → заглушка `[пропущено]`
+4. Все results добавляются как один user-message (Claude API требует `tool_result` для КАЖДОГО `tool_use`)
+5. `execute_approved_tool` заменяет placeholder реальным результатом
+
+### Approval flow (execute_approved_tool)
+
+Две фазы с изоляцией ошибок:
+- **Фаза 1**: MCP tool call — если упал, `raise` (пользователь видит ошибку)
+- **Фаза 2**: Claude API call — если упал но tool выполнен, возвращает fallback "Действие выполнено" вместо ошибки
+- `_safe_edit` в approvals.py: 3 уровня fallback для Telegram (HTML edit → plain edit → answer)
 
 ## Фазы проекта (tool_policy)
 
