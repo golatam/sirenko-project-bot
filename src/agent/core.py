@@ -121,7 +121,8 @@ class AgentCore:
             return await self._simple_response(project_id, project, user_message, phase)
 
         # 1. Системный промпт
-        system_prompt = build_system_prompt(project_id, project, phase)
+        connected = self._get_connected_services(project_id)
+        system_prompt = build_system_prompt(project_id, project, phase, connected)
 
         # 2. История из БД
         history = await get_conversation_history(self.db, project_id, limit=20)
@@ -317,7 +318,8 @@ class AgentCore:
 
         Экономия: Haiku ($1/M vs $3/M) + нет tool definitions (~2000 токенов меньше).
         """
-        system_prompt = build_system_prompt(project_id, project, phase)
+        connected = self._get_connected_services(project_id)
+        system_prompt = build_system_prompt(project_id, project, phase, connected)
         model = "claude-haiku-4-5"
 
         # Берём минимум истории для контекста
@@ -384,7 +386,8 @@ class AgentCore:
         })
 
         project = self.settings.projects[project_id]
-        system_prompt = build_system_prompt(project_id, project, project.phase)
+        connected = self._get_connected_services(project_id)
+        system_prompt = build_system_prompt(project_id, project, project.phase, connected)
         project_tools = self.mcp.get_project_tools(project_id)
         anthropic_tools = mcp_tools_to_anthropic(project_tools)
 
@@ -498,6 +501,24 @@ class AgentCore:
             if meta and meta.category not in categories:
                 categories.append(meta.category)
         return categories
+
+    def _get_connected_services(self, project_id: str) -> list[str]:
+        """Получить display_name подключённых MCP-сервисов для системного промпта."""
+        project = self.settings.projects.get(project_id)
+        if not project:
+            return []
+
+        services: list[str] = []
+        seen_types: set[str] = set()
+        for instance_id in project.mcp_services:
+            inst = self.settings.global_config.mcp_instances.get(instance_id)
+            if not inst:
+                continue
+            meta = MCP_TYPE_META.get(inst.type)
+            if meta and inst.type.value not in seen_types:
+                seen_types.add(inst.type.value)
+                services.append(meta.display_name)
+        return services
 
     @staticmethod
     def _truncate_tool_result(text: str, max_chars: int = 2000) -> str:

@@ -9,8 +9,17 @@ from src.mcp.types import MCP_TYPE_META, McpServerType
 from src.settings import PROJECT_ROOT, ProjectConfig
 
 
-def build_system_prompt(project_id: str, project: ProjectConfig, phase: str) -> str:
-    """Собрать системный промпт из файла + контекст проекта + правила фазы."""
+def build_system_prompt(
+    project_id: str,
+    project: ProjectConfig,
+    phase: str,
+    connected_services: list[str] | None = None,
+) -> str:
+    """Собрать системный промпт из файла + контекст проекта + правила фазы.
+
+    connected_services — список display_name подключённых MCP-сервисов
+    (например, ["Gmail", "Google Calendar", "Slack"]).
+    """
     parts: list[str] = []
 
     # 1. Базовый промпт из файла (поддержка относительных путей через PROJECT_ROOT)
@@ -28,7 +37,17 @@ def build_system_prompt(project_id: str, project: ProjectConfig, phase: str) -> 
     parts.append(f"- Проект: {project.display_name} (ID: {project_id})")
     parts.append(f"- Фаза: {phase}")
 
-    # 3. Правила фазы
+    # 3. Подключённые сервисы (динамически из конфига)
+    if connected_services:
+        parts.append(f"\n## Подключённые сервисы\n")
+        parts.append("У тебя есть доступ к следующим сервисам:")
+        for svc in connected_services:
+            parts.append(f"- {svc}")
+    else:
+        parts.append(f"\n## Подключённые сервисы\n")
+        parts.append("К проекту не подключены MCP-сервисы.")
+
+    # 4. Правила фазы
     phase_rules = _get_phase_rules(phase)
     parts.append(f"\n## Правила текущей фазы ({phase})\n")
     parts.append(phase_rules)
