@@ -228,6 +228,26 @@ class AgentCore:
 
                     if tool_name in approval_list:
                         logger.info("Инструмент '%s' требует подтверждения", tool_name)
+
+                        # Добавляем tool_results для ВСЕХ tool_use блоков:
+                        # уже обработанные + placeholder для approval + заглушки для остальных
+                        all_results = list(tool_results)
+                        current_idx = tool_blocks.index(tool_block)
+                        # Placeholder для approval tool (заменится в execute_approved_tool)
+                        all_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": "[ожидание подтверждения]",
+                        })
+                        # Заглушки для ещё не обработанных tools после approval
+                        for remaining in tool_blocks[current_idx + 1:]:
+                            all_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": remaining.id,
+                                "content": "[пропущено — ожидание подтверждения другого инструмента]",
+                            })
+                        messages.append({"role": "user", "content": all_results})
+
                         await save_message(self.db, project_id, "user", json.dumps(user_message))
                         await track_cost(self.db, project_id, model, total_input, total_output)
 
@@ -380,14 +400,27 @@ class AgentCore:
                 result_text, model, latency_ms=latency, is_error=True,
             )
 
-        messages.append({
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": approval.tool_use_id,
-                "content": self._truncate_tool_result(result_text),
-            }],
-        })
+        # Заменяем placeholder в последнем user-сообщении (tool_results)
+        truncated_result = self._truncate_tool_result(result_text)
+        replaced = False
+        if messages and messages[-1].get("role") == "user":
+            content = messages[-1].get("content", [])
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("tool_use_id") == approval.tool_use_id:
+                        item["content"] = truncated_result
+                        replaced = True
+                        break
+        if not replaced:
+            # Fallback: нет placeholder — добавляем отдельным сообщением
+            messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": approval.tool_use_id,
+                    "content": truncated_result,
+                }],
+            })
 
         # Фаза 2: получаем ответ Claude (если упадёт — не скрываем что tool выполнен)
         try:
