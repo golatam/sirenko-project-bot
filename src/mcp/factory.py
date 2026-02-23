@@ -70,6 +70,11 @@ def _calendar_params(config: McpInstanceConfig) -> StdioServerParameters:
 
     Требует GOOGLE_OAUTH_CREDENTIALS — путь к Google Cloud OAuth credentials.json.
     Токены сохраняются в GOOGLE_CALENDAR_MCP_TOKEN_PATH (отдельно от Gmail).
+
+    Credentials могут поступить двумя путями:
+    1. credentials_dir в конфиге → строим пути к файлам
+    2. Env vars из bootstrap_credentials (Railway) → пробрасываем напрямую
+    _safe_base_env() НЕ включает эти vars — нужен явный проброс.
     """
     env = _safe_base_env()
     if config.credentials_dir:
@@ -83,8 +88,25 @@ def _calendar_params(config: McpInstanceConfig) -> StdioServerParameters:
         )
         env["GOOGLE_OAUTH_CREDENTIALS"] = oauth_path
         env["GOOGLE_CALENDAR_MCP_TOKEN_PATH"] = token_path
+    else:
+        # Fallback: bootstrap_credentials устанавливает env vars напрямую
+        # (Railway: CRED_CALENDAR_KEYS → gcp-oauth.keys.json, CRED_CALENDAR_TOKENS → tokens.json).
+        # _safe_base_env() их не включает — пробрасываем явно.
+        for key in ("GOOGLE_OAUTH_CREDENTIALS", "GOOGLE_CALENDAR_MCP_TOKEN_PATH"):
+            val = os.environ.get(key)
+            if val:
+                env[key] = val
+                logger.info("Calendar MCP: %s=%s (из env)", key, val)
     if config.account_id:
         env["CALENDAR_ACCOUNT"] = config.account_id
+
+    has_oauth = "GOOGLE_OAUTH_CREDENTIALS" in env
+    has_token = "GOOGLE_CALENDAR_MCP_TOKEN_PATH" in env
+    if not has_oauth:
+        logger.warning("Calendar MCP: GOOGLE_OAUTH_CREDENTIALS не задан — сервер может не стартовать!")
+    if not has_token:
+        logger.warning("Calendar MCP: GOOGLE_CALENDAR_MCP_TOKEN_PATH не задан")
+
     return StdioServerParameters(
         command="npx",
         args=["-y", "@cocal/google-calendar-mcp"],
