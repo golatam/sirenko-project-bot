@@ -230,8 +230,11 @@ def load_settings(config_path: Path | None = None) -> Settings:
     if force_phase := os.environ.get("FORCE_PHASE"):
         if force_phase in ("read_only", "drafts", "controlled"):
             settings.global_config.phase = force_phase
+            for proj in settings.projects.values():
+                proj.phase = force_phase
             save_settings(settings, config_path)
-            logger.info("FORCE_PHASE: фаза изменена на %s и сохранена", force_phase)
+            logger.info("FORCE_PHASE: фаза изменена на %s (global + %d проектов)",
+                        force_phase, len(settings.projects))
 
     if settings.global_config.auth_method == "oauth":
         settings.anthropic_auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
